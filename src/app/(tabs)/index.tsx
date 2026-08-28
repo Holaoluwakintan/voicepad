@@ -12,6 +12,7 @@ import {
   View,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { useRouter } from 'expo-router';
 
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
@@ -31,6 +32,7 @@ const SURFACE = '#F5F3FA';
 const BORDER = '#E8E5F0';
 
 export default function HomeScreen() {
+  const router = useRouter();
   const [notes, setNotes] = useState<Note[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [isComposerOpen, setIsComposerOpen] = useState(false);
@@ -174,8 +176,8 @@ export default function HomeScreen() {
 
               <Pressable
                 accessibilityRole="button"
-                accessibilityLabel="Create a text note"
-                onPress={openComposer}
+                accessibilityLabel="Tap to speak and create a voice note"
+                onPress={() => router.push('/note/record')}
                 style={({ pressed }) => [
                   styles.recordCard,
                   pressed && styles.recordCardPressed,
@@ -187,9 +189,9 @@ export default function HomeScreen() {
                   </View>
                 </View>
                 <View style={styles.recordCopy}>
-                  <ThemedText style={styles.recordTitle}>Create a note</ThemedText>
+                  <ThemedText style={styles.recordTitle}>Tap to speak</ThemedText>
                   <ThemedText style={styles.recordSubtitle}>
-                    Write it down now; voice capture comes next
+                    Turn your voice into an organized note
                   </ThemedText>
                 </View>
                 <ThemedText style={styles.arrow}>›</ThemedText>
@@ -213,7 +215,7 @@ export default function HomeScreen() {
                   </View>
                   <ThemedText style={styles.emptyTitle}>Your ideas start here</ThemedText>
                   <ThemedText style={styles.emptySubtitle}>
-                    Create your first text note. Voice recording will be connected after this milestone.
+                    Create your first text note, or use the purple card above to record your voice.
                   </ThemedText>
                   <Pressable
                     accessibilityRole="button"
@@ -332,3 +334,4 @@ const styles = StyleSheet.create({
   saveButtonText: { color: '#FFFFFF', fontSize: 16, fontWeight: '800' },
   pressed: { opacity: 0.7 },
 });
+
