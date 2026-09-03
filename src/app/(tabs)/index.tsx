@@ -1,5 +1,5 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useMemo, useState } from 'react';
 import {
   Alert,
   FlatList,
@@ -12,7 +12,8 @@ import {
   View,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { useRouter } from 'expo-router';
+import { useFocusEffect, useRouter } from 'expo-router';
+import { useAudioPlayer, useAudioPlayerStatus } from 'expo-audio';
 
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
@@ -22,6 +23,10 @@ type Note = {
   title: string;
   content: string;
   createdAt: string;
+  audioUri?: string;
+  source?: 'voice' | 'text';
+  transcript?: string;
+  transcriptionStatus?: 'pending' | 'ready' | 'failed';
 };
 
 const STORAGE_KEY = '@voicepad/notes';
@@ -30,6 +35,50 @@ const INK = '#17152A';
 const MUTED = '#79768A';
 const SURFACE = '#F5F3FA';
 const BORDER = '#E8E5F0';
+
+function VoiceNoteCard({
+  item,
+  onLongPress,
+  formatDate,
+}: {
+  item: Note;
+  onLongPress: () => void;
+  formatDate: (dateString: string) => string;
+}) {
+  const player = useAudioPlayer(item.audioUri ?? null);
+  const playerStatus = useAudioPlayerStatus(player);
+  const isVoice = Boolean(item.audioUri);
+
+  return (
+    <Pressable
+      accessibilityRole="button"
+      accessibilityLabel={isVoice ? `${playerStatus.playing ? 'Pause' : 'Play'} voice note ${item.title}` : `Open note ${item.title}`}
+      onPress={() => {
+        if (item.audioUri) {
+          playerStatus.playing ? player.pause() : player.play();
+        }
+      }}
+      onLongPress={onLongPress}
+      style={({ pressed }) => [styles.noteCard, pressed && styles.noteCardPressed]}
+    >
+      <View style={styles.noteAccent} />
+      <View style={styles.noteBody}>
+        <View style={styles.noteTitleRow}>
+          <ThemedText style={styles.noteTitle} numberOfLines={1}>{item.title}</ThemedText>
+          {isVoice && <ThemedText style={styles.playBadge}>{playerStatus.playing ? 'Pause' : 'Play'}</ThemedText>}
+        </View>
+        <ThemedText style={styles.notePreview} numberOfLines={2}>
+          {item.transcriptionStatus === 'pending'
+            ? 'Transcribing your voice note…'
+            : item.transcriptionStatus === 'failed'
+              ? 'Transcription failed. Audio is still saved.'
+              : item.content || 'Audio voice note'}
+        </ThemedText>
+        <ThemedText style={styles.noteDate}>{formatDate(item.createdAt)}</ThemedText>
+      </View>
+    </Pressable>
+  );
+}
 
 export default function HomeScreen() {
   const router = useRouter();
@@ -46,9 +95,13 @@ export default function HomeScreen() {
     return 'Good evening';
   }, []);
 
-  useEffect(() => {
-    loadNotes();
-  }, []);
+  useFocusEffect(
+    useCallback(() => {
+      loadNotes();
+      const refreshTimer = setInterval(loadNotes, 2000);
+      return () => clearInterval(refreshTimer);
+    }, []),
+  );
 
   async function loadNotes() {
     try {
@@ -123,25 +176,7 @@ export default function HomeScreen() {
   }
 
   function renderNote({ item }: { item: Note }) {
-    return (
-      <Pressable
-        accessibilityRole="button"
-        accessibilityLabel={`Open note ${item.title}`}
-        onLongPress={() => deleteNote(item)}
-        style={({ pressed }) => [styles.noteCard, pressed && styles.noteCardPressed]}
-      >
-        <View style={styles.noteAccent} />
-        <View style={styles.noteBody}>
-          <ThemedText style={styles.noteTitle} numberOfLines={1}>
-            {item.title}
-          </ThemedText>
-          <ThemedText style={styles.notePreview} numberOfLines={2}>
-            {item.content || 'No additional content'}
-          </ThemedText>
-          <ThemedText style={styles.noteDate}>{formatDate(item.createdAt)}</ThemedText>
-        </View>
-      </Pressable>
-    );
+    return <VoiceNoteCard item={item} onLongPress={() => deleteNote(item)} formatDate={formatDate} />;
   }
 
   return (
@@ -319,7 +354,9 @@ const styles = StyleSheet.create({
   noteCardPressed: { opacity: 0.72 },
   noteAccent: { width: 5, backgroundColor: ACCENT },
   noteBody: { flex: 1, paddingHorizontal: 16, paddingVertical: 15 },
-  noteTitle: { color: INK, fontSize: 16, fontWeight: '800' },
+  noteTitleRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  noteTitle: { color: INK, fontSize: 16, fontWeight: '800', flex: 1 },
+  playBadge: { color: ACCENT, fontSize: 12, fontWeight: '800' },
   notePreview: { color: MUTED, fontSize: 14, lineHeight: 20, marginTop: 5 },
   noteDate: { color: '#9B97AA', fontSize: 12, marginTop: 9 },
   footerHint: { color: '#9B97AA', fontSize: 12, textAlign: 'center', marginTop: 8 },

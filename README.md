@@ -1,56 +1,67 @@
-# Welcome to your Expo app 👋
+# VoicePad
 
-This is an [Expo](https://expo.dev) project created with [`create-expo-app`](https://www.npmjs.com/package/create-expo-app).
+VoicePad is an Expo mobile and web app for recording voice notes and converting them to English text with Groq Whisper.
 
-## Get started
+## Run locally
 
-1. Install dependencies
+Use two separate PowerShell windows. The server and Expo app must never be started from the same folder.
 
-   ```bash
-   npm install
-   ```
+### Window 1: transcription server
 
-2. Start the app
-
-   ```bash
-   npx expo start
-   ```
-
-In the output, you'll find options to open the app in a
-
-- [development build](https://docs.expo.dev/develop/development-builds/introduction/)
-- [Android emulator](https://docs.expo.dev/workflow/android-studio-emulator/)
-- [iOS simulator](https://docs.expo.dev/workflow/ios-simulator/)
-- [Expo Go](https://expo.dev/go), a limited sandbox for trying out app development with Expo
-
-You can start developing by editing the files inside the **app** directory. This project uses [file-based routing](https://docs.expo.dev/router/introduction).
-
-## Get a fresh project
-
-When you're ready, run:
-
-```bash
-npm run reset-project
+```powershell
+cd "C:\Users\USERR\voicepad-groq-clean\server"
+npm install
+$env:GROQ_API_KEY="YOUR_REAL_GROQ_API_KEY"
+npm start
 ```
 
-This command will move the starter code to the **app-example** directory and create a blank **app** directory where you can start developing.
+Keep this window open. The server listens on port `8787`.
 
-### Other setup steps
+### Window 2: Expo app
 
-- To set up ESLint for linting, run `npx expo lint`, or follow our guide on ["Using ESLint and Prettier"](https://docs.expo.dev/guides/using-eslint/)
-- If you'd like to set up unit testing, follow our guide on ["Unit Testing with Jest"](https://docs.expo.dev/develop/unit-testing/)
-- Learn more about the TypeScript setup in this template in our guide on ["Using TypeScript"](https://docs.expo.dev/guides/typescript/)
+```powershell
+cd "C:\Users\USERR\voicepad-groq-clean"
+npm install
+npx expo start --clear
+```
 
-## Learn more
+The project root is the folder containing the main `package.json`, `app.json`, and `src` directory. Do not run Expo from `server`.
 
-To learn more about developing your project with Expo, look at the following resources:
+## Server URL defaults
 
-- [Expo documentation](https://docs.expo.dev/): Learn fundamentals, or go into advanced topics with our [guides](https://docs.expo.dev/guides).
-- [Learn Expo tutorial](https://docs.expo.dev/tutorial/introduction/): Follow a step-by-step tutorial where you'll create a project that runs on Android, iOS, and the web.
+The app uses the following defaults when `EXPO_PUBLIC_TRANSCRIPTION_API_URL` is not set:
 
-## Join the community
+- Web: `http://localhost:8787`
+- Android emulator: `http://10.0.2.2:8787`
 
-Join our community of developers creating universal apps.
+For a physical phone on the same Wi-Fi as the computer, create `.env` in the project root with the computer’s LAN IP:
 
-- [Expo on GitHub](https://github.com/expo/expo): View our open source platform and contribute.
-- [Discord community](https://chat.expo.dev): Chat with Expo users and ask questions.
+```env
+EXPO_PUBLIC_TRANSCRIPTION_API_URL=http://192.168.1.20:8787
+```
+
+Replace the example IP with the computer’s IPv4 address from `ipconfig`, then restart Expo.
+
+## Test the server
+
+From another PowerShell window:
+
+```powershell
+Invoke-WebRequest http://localhost:8787/health
+```
+
+Expected response:
+
+```json
+{"ok":true,"service":"voicepad-transcription"}
+```
+
+## Transcription behavior
+
+When a recording stops, VoicePad saves the audio locally first, then calls the server. The server sends the audio to Groq’s `/audio/translations` endpoint using `whisper-large-v3`, returning English text. The Groq key remains server-side and must never be added to the Expo `.env` file or committed to Git.
+
+## Development rules
+
+Do not run `npm audit fix --force` in this Expo project; it can change Expo package versions and break compatibility. Install dependencies with `npm install` only.
+
+The server implementation and deployment notes are in [`server/README.md`](server/README.md).

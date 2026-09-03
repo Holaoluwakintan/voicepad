@@ -1,5 +1,8 @@
+import { Platform } from 'react-native';
+
 const TRANSCRIPTION_API_URL =
-  process.env.EXPO_PUBLIC_TRANSCRIPTION_API_URL ?? 'http://10.0.2.2:8787';
+  process.env.EXPO_PUBLIC_TRANSCRIPTION_API_URL ??
+  (Platform.OS === 'web' ? 'http://localhost:8787' : 'http://10.0.2.2:8787');
 
 export type TranscriptionResult = {
   text: string;
@@ -8,7 +11,7 @@ export type TranscriptionResult = {
 
 export async function transcribeAudio(
   audioUri: string,
-  options: { noteId: string; filename?: string } ,
+  options: { noteId: string; filename?: string },
 ): Promise<TranscriptionResult> {
   const form = new FormData();
   form.append('noteId', options.noteId);
