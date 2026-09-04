@@ -1,12 +1,6 @@
 # VoicePad transcription server
 
-This small server keeps the Groq API key off the mobile app. VoicePad currently sends one clear request—**Transcribe to English**—and the server calls Groq’s audio translation endpoint:
-
-`https://api.groq.com/openai/v1/audio/translations`
-
-The server also supports the original-language endpoint at `/transcribe` when the multipart field `mode=original` is sent:
-
-`https://api.groq.com/openai/v1/audio/transcriptions`
+This small server keeps the Groq API key off the mobile app. VoicePad sends audio to the server, which calls Groq's audio translation endpoint and returns English text.
 
 ## Run locally
 
@@ -26,31 +20,39 @@ $env:GROQ_API_KEY="your-server-only-key"
 npm start
 ```
 
-The server listens on port `8787`.
+The server listens on the hosting platform's `PORT` value, or `8787` locally.
+
+## Hosted deployment
+
+The repository includes `/render.yaml` for a Node web service. In Render, create a new Blueprint from the GitHub repository and set the required secret:
+
+```text
+GROQ_API_KEY=your-new-server-only-key
+```
+
+Optional production variables are:
+
+```text
+GROQ_TRANSLATION_MODEL=whisper-large-v3
+GROQ_TRANSCRIPTION_MODEL=whisper-large-v3-turbo
+MAX_REQUESTS_PER_MINUTE=10
+ALLOWED_ORIGINS=*
+```
+
+The service health check is:
+
+```text
+GET /health
+```
+
+The public app should use the resulting HTTPS URL, for example:
+
+```env
+EXPO_PUBLIC_TRANSCRIPTION_API_URL=https://voicepad-transcription.onrender.com
+```
+
+Never put `GROQ_API_KEY` in the Expo `.env`, source code, ZIP, or mobile build. Keep the key only in the server hosting provider's private environment settings.
 
 ## Models
 
-- English translation: `whisper-large-v3` by default.
-- Original-language transcription: `whisper-large-v3-turbo` by default.
-
-You can override them on the server:
-
-```powershell
-$env:GROQ_TRANSLATION_MODEL="whisper-large-v3"
-$env:GROQ_TRANSCRIPTION_MODEL="whisper-large-v3-turbo"
-```
-
-## Connect the app
-
-Create a `.env` file in the project root (do not commit it):
-
-- Android emulator: `EXPO_PUBLIC_TRANSCRIPTION_API_URL=http://10.0.2.2:8787`
-- Physical phone on the same Wi-Fi: use the computer's LAN IP, for example `EXPO_PUBLIC_TRANSCRIPTION_API_URL=http://192.168.1.20:8787`
-
-Restart Expo after changing `.env`.
-
-The mobile app saves the recording first, then sends it to the server. If translation fails, the audio remains available locally.
-
-## Important security rule
-
-Only put `GROQ_API_KEY` in the server terminal or server hosting environment. Never put it in the Expo `.env` file, source code, ZIP, or mobile build.
+English translation uses `whisper-large-v3` by default. Original-language transcription uses `whisper-large-v3-turbo` by default.

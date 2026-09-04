@@ -1,0 +1,19 @@
+services:
+  - type: web
+    name: voicepad-transcription
+    runtime: node
+    rootDir: server
+    buildCommand: npm install --omit=dev
+    startCommand: npm start
+    healthCheckPath: /health
+    envVars:
+      - key: GROQ_API_KEY
+        sync: false
+      - key: GROQ_TRANSLATION_MODEL
+        value: whisper-large-v3
+      - key: GROQ_TRANSCRIPTION_MODEL
+        value: whisper-large-v3-turbo
+      - key: MAX_REQUESTS_PER_MINUTE
+        value: "10"
+      - key: ALLOWED_ORIGINS
+        value: "*"
