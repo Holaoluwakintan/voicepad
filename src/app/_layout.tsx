@@ -15,6 +15,7 @@ export default function RootLayout() {
       <Stack screenOptions={{ headerShown: false }}>
         <Stack.Screen name="(tabs)" />
         <Stack.Screen name="note/record" />
+        <Stack.Screen name="note/[id]" />
       </Stack>
     </ThemeProvider>
   );

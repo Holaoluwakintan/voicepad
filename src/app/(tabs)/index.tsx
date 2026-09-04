@@ -13,7 +13,6 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useFocusEffect, useRouter } from 'expo-router';
-import { useAudioPlayer, useAudioPlayerStatus } from 'expo-audio';
 
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
@@ -40,25 +39,21 @@ const BORDER = '#E8E5F0';
 function VoiceNoteCard({
   item,
   onLongPress,
+  onPress,
   formatDate,
 }: {
   item: Note;
   onLongPress: () => void;
+  onPress: () => void;
   formatDate: (dateString: string) => string;
 }) {
-  const player = useAudioPlayer(item.audioUri ?? null);
-  const playerStatus = useAudioPlayerStatus(player);
   const isVoice = Boolean(item.audioUri);
 
   return (
     <Pressable
       accessibilityRole="button"
-      accessibilityLabel={isVoice ? `${playerStatus.playing ? 'Pause' : 'Play'} voice note ${item.title}` : `Open note ${item.title}`}
-      onPress={() => {
-        if (item.audioUri) {
-          playerStatus.playing ? player.pause() : player.play();
-        }
-      }}
+      accessibilityLabel={isVoice ? `Open voice note ${item.title}` : `Open note ${item.title}`}
+      onPress={onPress}
       onLongPress={onLongPress}
       style={({ pressed }) => [styles.noteCard, pressed && styles.noteCardPressed]}
     >
@@ -66,7 +61,7 @@ function VoiceNoteCard({
       <View style={styles.noteBody}>
         <View style={styles.noteTitleRow}>
           <ThemedText style={styles.noteTitle} numberOfLines={1}>{item.title}</ThemedText>
-          {isVoice && <ThemedText style={styles.playBadge}>{playerStatus.playing ? 'Pause' : 'Play'}</ThemedText>}
+          {isVoice && <ThemedText style={styles.playBadge}>Open</ThemedText>}
         </View>
         <ThemedText style={styles.notePreview} numberOfLines={2}>
           {item.transcriptionStatus === 'pending'
@@ -177,7 +172,7 @@ export default function HomeScreen() {
   }
 
   function renderNote({ item }: { item: Note }) {
-    return <VoiceNoteCard item={item} onLongPress={() => deleteNote(item)} formatDate={formatDate} />;
+    return <VoiceNoteCard item={item} onPress={() => router.push(`/note/${item.id}`)} onLongPress={() => deleteNote(item)} formatDate={formatDate} />;
   }
 
   return (
