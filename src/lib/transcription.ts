@@ -19,7 +19,14 @@ export async function transcribeAudio(
   const nativeFilename = options.filename ?? `voicepad-${options.noteId}.m4a`;
 
   if (Platform.OS === 'web') {
-    const audioBlob = await fetch(audioUri).then((result) => result.blob());
+    let audioBlob: Blob;
+    try {
+      const blobResponse = await fetch(audioUri);
+      if (!blobResponse.ok) throw new Error(`recording URL returned ${blobResponse.status}`);
+      audioBlob = await blobResponse.blob();
+    } catch {
+      throw new Error('Could not read the browser recording. Please record again and try once more.');
+    }
     const extension = audioBlob.type.includes('ogg') ? 'ogg' : 'webm';
     form.append('file', audioBlob, `voicepad-${options.noteId}.${extension}`);
   } else {
@@ -30,10 +37,15 @@ export async function transcribeAudio(
     } as unknown as Blob);
   }
 
-  const response = await fetch(`${TRANSCRIPTION_API_URL}/transcribe`, {
-    method: 'POST',
-    body: form,
-  });
+  let response: Response;
+  try {
+    response = await fetch(`${TRANSCRIPTION_API_URL}/transcribe`, {
+      method: 'POST',
+      body: form,
+    });
+  } catch {
+    throw new Error(`Could not reach the transcription server at ${TRANSCRIPTION_API_URL}. Check that it is running and restart Expo after changing .env.`);
+  }
 
   const payload = await response.json().catch(() => null);
   if (!response.ok) {
