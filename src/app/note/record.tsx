@@ -26,6 +26,7 @@ type VoiceNote = {
   content: string;
   audioUri: string;
   source: 'voice';
+  category: 'Personal';
   createdAt: string;
   transcript?: string;
   transcriptionStatus?: 'pending' | 'ready' | 'failed';
@@ -80,6 +81,7 @@ export default function RecordScreen() {
         content: 'Audio recording saved. Transcription is starting…',
         audioUri: uri,
         source: 'voice',
+        category: 'Personal',
         createdAt: new Date().toISOString(),
         transcriptionStatus: 'pending',
       };
