@@ -38,13 +38,21 @@ export async function transcribeAudio(
   }
 
   let response: Response;
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 45_000);
   try {
     response = await fetch(`${TRANSCRIPTION_API_URL}/transcribe`, {
       method: 'POST',
       body: form,
+      signal: controller.signal,
     });
-  } catch {
+  } catch (error) {
+    if (error instanceof Error && error.name === 'AbortError') {
+      throw new Error('Transcription timed out after 45 seconds. Your audio is still saved; please retry.');
+    }
     throw new Error(`Could not reach the transcription server at ${TRANSCRIPTION_API_URL}. Check that it is running and restart Expo after changing .env.`);
+  } finally {
+    clearTimeout(timeout);
   }
 
   const payload = await response.json().catch(() => null);
