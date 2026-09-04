@@ -16,11 +16,18 @@ export async function transcribeAudio(
   const form = new FormData();
   form.append('noteId', options.noteId);
   form.append('mode', 'english');
-  form.append('file', {
-    uri: audioUri,
-    name: options.filename ?? `voicepad-${options.noteId}.m4a`,
-    type: 'audio/m4a',
-  } as unknown as Blob);
+  const filename = options.filename ?? `voicepad-${options.noteId}.m4a`;
+
+  if (Platform.OS === 'web') {
+    const audioBlob = await fetch(audioUri).then((result) => result.blob());
+    form.append('file', audioBlob, filename);
+  } else {
+    form.append('file', {
+      uri: audioUri,
+      name: filename,
+      type: 'audio/m4a',
+    } as unknown as Blob);
+  }
 
   const response = await fetch(`${TRANSCRIPTION_API_URL}/transcribe`, {
     method: 'POST',
