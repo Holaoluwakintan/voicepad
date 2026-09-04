@@ -16,15 +16,16 @@ export async function transcribeAudio(
   const form = new FormData();
   form.append('noteId', options.noteId);
   form.append('mode', 'english');
-  const filename = options.filename ?? `voicepad-${options.noteId}.m4a`;
+  const nativeFilename = options.filename ?? `voicepad-${options.noteId}.m4a`;
 
   if (Platform.OS === 'web') {
     const audioBlob = await fetch(audioUri).then((result) => result.blob());
-    form.append('file', audioBlob, filename);
+    const extension = audioBlob.type.includes('ogg') ? 'ogg' : 'webm';
+    form.append('file', audioBlob, `voicepad-${options.noteId}.${extension}`);
   } else {
     form.append('file', {
       uri: audioUri,
-      name: filename,
+      name: nativeFilename,
       type: 'audio/m4a',
     } as unknown as Blob);
   }

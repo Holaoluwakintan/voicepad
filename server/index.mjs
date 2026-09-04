@@ -27,6 +27,8 @@ app.post('/transcribe', upload.single('file'), async (req, res) => {
     ? process.env.GROQ_TRANSLATION_MODEL || 'whisper-large-v3'
     : process.env.GROQ_TRANSCRIPTION_MODEL || 'whisper-large-v3-turbo';
 
+  console.log(`transcription_request mode=${mode} file=${req.file.originalname || 'unknown'} bytes=${req.file.size} model=${model}`);
+
   try {
     const form = new FormData();
     form.append('file', new Blob([req.file.buffer], { type: req.file.mimetype || 'audio/mp4' }), req.file.originalname || 'voice-note.m4a');
@@ -51,6 +53,7 @@ app.post('/transcribe', upload.single('file'), async (req, res) => {
       return res.status(502).json({ error: 'Groq returned no transcript.' });
     }
 
+    console.log(`groq_transcription_succeeded mode=${mode}`);
     return res.json({ text: payload.text, mode, model });
   } catch (error) {
     console.error('transcription_failed', error instanceof Error ? error.message : error);

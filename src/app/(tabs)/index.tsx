@@ -27,6 +27,7 @@ type Note = {
   source?: 'voice' | 'text';
   transcript?: string;
   transcriptionStatus?: 'pending' | 'ready' | 'failed';
+  transcriptionError?: string;
 };
 
 const STORAGE_KEY = '@voicepad/notes';
@@ -71,7 +72,7 @@ function VoiceNoteCard({
           {item.transcriptionStatus === 'pending'
             ? 'Transcribing your voice note…'
             : item.transcriptionStatus === 'failed'
-              ? 'Transcription failed. Audio is still saved.'
+              ? `Transcription failed: ${item.transcriptionError || 'Audio is still saved.'}`
               : item.content || 'Audio voice note'}
         </ThemedText>
         <ThemedText style={styles.noteDate}>{formatDate(item.createdAt)}</ThemedText>

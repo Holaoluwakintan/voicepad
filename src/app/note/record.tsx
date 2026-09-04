@@ -29,6 +29,7 @@ type VoiceNote = {
   createdAt: string;
   transcript?: string;
   transcriptionStatus?: 'pending' | 'ready' | 'failed';
+  transcriptionError?: string;
 };
 
 export default function RecordScreen() {
@@ -109,11 +110,14 @@ export default function RecordScreen() {
           : note,
       );
       await AsyncStorage.setItem(NOTES_KEY, JSON.stringify(updatedNotes));
-    } catch {
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Unknown transcription error';
       const saved = await AsyncStorage.getItem(NOTES_KEY);
       const currentNotes: VoiceNote[] = saved ? JSON.parse(saved) : previousNotes;
       const updatedNotes = currentNotes.map((note) =>
-        note.id === noteId ? { ...note, transcriptionStatus: 'failed' as const } : note,
+        note.id === noteId
+          ? { ...note, transcriptionStatus: 'failed' as const, transcriptionError: message }
+          : note,
       );
       await AsyncStorage.setItem(NOTES_KEY, JSON.stringify(updatedNotes));
     }
