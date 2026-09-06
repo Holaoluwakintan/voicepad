@@ -43,10 +43,10 @@ export async function syncNotes(userId: string): Promise<SyncResult> {
   try {
     const localNotes = await loadNotes();
     if (localNotes.length) {
-      const { error: uploadError } = await supabase.from('notes').upsert(localNotes.map((note) => toRow(note, userId)), { onConflict: 'id' });
+      const { error: uploadError } = await supabase.from('voicepad_notes').upsert(localNotes.map((note) => toRow(note, userId)), { onConflict: 'id' });
       if (uploadError) return { ok: false, message: uploadError.message };
     }
-    const { data, error } = await supabase.from('notes').select('*').eq('user_id', userId).order('created_at', { ascending: false });
+    const { data, error } = await supabase.from('voicepad_notes').select('*').eq('user_id', userId).order('created_at', { ascending: false });
     if (error) return { ok: false, message: error.message };
     if (data) await saveNotes(data.map(fromRow));
     return { ok: true };
