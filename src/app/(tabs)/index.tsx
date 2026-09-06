@@ -17,6 +17,7 @@ import { useFocusEffect, useRouter } from 'expo-router';
 
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
+import { NoteCategory } from '@/lib/notes';
 
 const STORAGE_KEY = '@voicepad/notes';
 const ACCENT = '#21499A';
@@ -26,7 +27,7 @@ const MUTED = '#687384';
 const CANVAS = '#F1F5FB';
 const BORDER = '#E1E7F0';
 
-type Category = 'Lectures' | 'Sermons' | 'Meetings' | 'Personal';
+type Category = NoteCategory;
 type Note = {
   id: string;
   title: string;
@@ -197,7 +198,7 @@ export default function HomeScreen() {
           }
           ListFooterComponent={<View style={{ height: 110 }} />}
         />
-        <Pressable onPress={() => router.push('/note/record')} style={({ pressed }) => [styles.fab, pressed && styles.fabPressed]} accessibilityLabel="Record a voice note"><ThemedText style={styles.fabText}>♩</ThemedText></Pressable>
+        <Pressable onPress={() => router.push({ pathname: '/note/record', params: { category: selectedCategory === 'All' ? 'Personal' : selectedCategory } })} style={({ pressed }) => [styles.fab, pressed && styles.fabPressed]} accessibilityLabel="Record a voice note"><ThemedText style={styles.fabText}>♩</ThemedText></Pressable>
         {selectedNote && <View style={styles.actionTray}><View style={styles.thumbnail}><ThemedText style={styles.thumbnailText}>✦</ThemedText></View><Pressable onPress={() => Alert.alert('Share', 'Sharing will be connected in the next release.')} style={styles.actionButton}><ThemedText style={styles.actionText}>↗ Share</ThemedText></Pressable><Pressable onPress={() => { router.push(`/note/${selectedNote.id}`); setSelectedNote(null); }} style={styles.actionButton}><ThemedText style={styles.actionText}>✎ Edit</ThemedText></Pressable></View>}
       </SafeAreaView>
 

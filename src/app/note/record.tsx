@@ -7,13 +7,13 @@ import {
   useAudioRecorder,
   useAudioRecorderState,
 } from 'expo-audio';
-import { useRouter } from 'expo-router';
+import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useEffect, useState } from 'react';
 import { Alert, Pressable, StyleSheet, View } from 'react-native';
 
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
-import { insertNote, updateNote, Note, loadNotes } from '@/lib/notes';
+import { insertNote, updateNote, Note, loadNotes, NoteCategory } from '@/lib/notes';
 import { transcribeAudio } from '@/lib/transcription';
 
 const ACCENT = '#6D5DFB';
@@ -21,6 +21,10 @@ const MUTED = '#918DA1';
 
 export default function RecordScreen() {
   const router = useRouter();
+  const { category: categoryParam } = useLocalSearchParams<{ category?: string }>();
+  const selectedCategory: NoteCategory = categoryParam && ['Lectures', 'Sermons', 'Meetings', 'Personal'].includes(categoryParam)
+    ? categoryParam as NoteCategory
+    : 'Personal';
   const recorder = useAudioRecorder({ ...RecordingPresets.HIGH_QUALITY, directory: 'document' });
   const recorderState = useAudioRecorderState(recorder);
   const [permission, setPermission] = useState<'checking' | 'granted' | 'denied'>('checking');
@@ -65,7 +69,7 @@ export default function RecordScreen() {
         content: 'Audio recording saved. Transcription is starting…',
         audioUri: uri,
         source: 'voice',
-        category: 'Personal',
+        category: selectedCategory,
         createdAt: new Date().toISOString(),
         transcriptionStatus: 'pending',
       };

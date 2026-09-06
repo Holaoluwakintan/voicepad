@@ -1,4 +1,3 @@
-import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useFocusEffect, useRouter } from 'expo-router';
 import { useCallback, useMemo, useState } from 'react';
 import { FlatList, Pressable, StyleSheet, TextInput, View } from 'react-native';
@@ -6,27 +5,32 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
-import { getNoteCategory, NOTES_STORAGE_KEY, NOTE_CATEGORIES, Note } from '@/lib/notes';
+import { getNoteCategory, loadNotes as loadStoredNotes, NOTE_CATEGORIES, Note, NoteCategory } from '@/lib/notes';
 
 const BLUE = '#21499A';
 const INK = '#182235';
 const MUTED = '#687384';
 const CANVAS = '#F1F5FB';
 const BORDER = '#E1E7F0';
+const CATEGORY_COLORS: Record<NoteCategory, { background: string; text: string }> = {
+  Lectures: { background: '#DCEBFF', text: '#315A9A' },
+  Sermons: { background: '#D7F7E8', text: '#24835A' },
+  Meetings: { background: '#FFF0B2', text: '#B57500' },
+  Personal: { background: '#EDE7FF', text: '#6D5DFB' },
+};
 
 export default function NotesScreen() {
   const router = useRouter();
   const [notes, setNotes] = useState<Note[]>([]);
   const [query, setQuery] = useState('');
-  const [category, setCategory] = useState<'All' | Note['category']>('All');
+  const [category, setCategory] = useState<'All' | NoteCategory>('All');
 
   useFocusEffect(useCallback(() => {
     loadNotes();
   }, []));
 
   async function loadNotes() {
-    const saved = await AsyncStorage.getItem(NOTES_STORAGE_KEY);
-    if (saved) setNotes(JSON.parse(saved));
+    setNotes(await loadStoredNotes());
   }
 
   const filtered = useMemo(() => notes.filter((note) => {
@@ -46,10 +50,10 @@ export default function NotesScreen() {
             <ThemedText style={styles.eyebrow}>VOICEPAD</ThemedText>
             <ThemedText style={styles.title}>All notes</ThemedText>
             <TextInput value={query} onChangeText={setQuery} placeholder="Search your notes…" placeholderTextColor="#9AA4B2" style={styles.search} />
-            <FlatList horizontal data={['All', ...NOTE_CATEGORIES]} keyExtractor={(item) => item} showsHorizontalScrollIndicator={false} contentContainerStyle={styles.chips} renderItem={({ item }) => <Pressable onPress={() => setCategory(item as 'All' | Note['category'])} style={[styles.chip, category === item && styles.selectedChip]}><ThemedText style={[styles.chipText, category === item && styles.selectedText]}>{item}</ThemedText></Pressable>} />
+            <FlatList horizontal data={['All', ...NOTE_CATEGORIES]} keyExtractor={(item) => item} showsHorizontalScrollIndicator={false} contentContainerStyle={styles.chips} renderItem={({ item }) => <Pressable onPress={() => setCategory(item as 'All' | NoteCategory)} style={[styles.chip, category === item && styles.selectedChip]}><ThemedText style={[styles.chipText, category === item && styles.selectedText]}>{item}</ThemedText></Pressable>} />
             <ThemedText style={styles.count}>{filtered.length} {filtered.length === 1 ? 'note' : 'notes'}</ThemedText>
           </>}
-          renderItem={({ item }) => <Pressable onPress={() => router.push(`/note/${item.id}`)} style={styles.card}><ThemedText style={styles.category}>{getNoteCategory(item)}</ThemedText><ThemedText style={styles.noteTitle} numberOfLines={1}>{item.title}</ThemedText><ThemedText style={styles.preview} numberOfLines={2}>{item.content || 'Audio voice note'}</ThemedText><ThemedText style={styles.date}>{new Date(item.createdAt).toLocaleDateString()}</ThemedText></Pressable>}
+          renderItem={({ item }) => { const noteCategory = getNoteCategory(item); const colors = CATEGORY_COLORS[noteCategory]; return <Pressable onPress={() => router.push(`/note/${item.id}`)} style={styles.card}><ThemedText style={[styles.category, { backgroundColor: colors.background, color: colors.text }]}>{item.pinned ? '★ ' : ''}{noteCategory}</ThemedText><ThemedText style={styles.noteTitle} numberOfLines={1}>{item.title}</ThemedText><ThemedText style={styles.preview} numberOfLines={2}>{item.content || 'Audio voice note'}</ThemedText><ThemedText style={styles.date}>{new Date(item.createdAt).toLocaleDateString()}</ThemedText></Pressable>; }}
           ListEmptyComponent={<ThemedText style={styles.empty}>No notes match this filter.</ThemedText>}
         />
       </SafeAreaView>
@@ -71,7 +75,7 @@ const styles = StyleSheet.create({
   selectedText: { color: '#FFFFFF', fontWeight: '800' },
   count: { color: MUTED, fontSize: 13, marginBottom: 12 },
   card: { backgroundColor: '#FFFFFF', borderRadius: 20, borderWidth: 1, borderColor: BORDER, padding: 18, marginBottom: 12 },
-  category: { color: BLUE, fontSize: 12, fontWeight: '800' },
+  category: { alignSelf: 'flex-start', borderRadius: 12, paddingHorizontal: 10, paddingVertical: 5, fontSize: 12, fontWeight: '800' },
   noteTitle: { color: INK, fontSize: 17, fontWeight: '800', marginTop: 10 },
   preview: { color: MUTED, fontSize: 14, lineHeight: 21, marginTop: 7 },
   date: { color: '#9AA4B2', fontSize: 12, marginTop: 12 },

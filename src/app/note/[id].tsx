@@ -82,6 +82,12 @@ export default function NoteDetailScreen() {
     });
   }
 
+  async function togglePin() {
+    if (!note) return;
+    const updated = await updateNote(note.id, { pinned: !note.pinned });
+    setNote(updated);
+  }
+
   if (!note) {
     return <ThemedView style={styles.center}><ThemedText style={styles.muted}>Note not found.</ThemedText></ThemedView>;
   }
@@ -112,6 +118,10 @@ export default function NoteDetailScreen() {
             </Pressable>
           ))}
         </ScrollView>
+
+        <Pressable onPress={togglePin} style={[styles.pinButton, note.pinned && styles.pinButtonActive]} accessibilityLabel={note.pinned ? 'Unpin note' : 'Pin note'}>
+          <ThemedText style={[styles.pinText, note.pinned && styles.pinTextActive]}>{note.pinned ? '★ Pinned note' : '☆ Pin this note'}</ThemedText>
+        </Pressable>
 
         {note.audioUri && (
           <Pressable onPress={() => playerStatus.playing ? player.pause() : player.play()} style={styles.playButton}>
@@ -165,6 +175,10 @@ const styles = StyleSheet.create({
   categoryChipSelected: { backgroundColor: ACCENT, borderColor: ACCENT },
   categoryText: { color: MUTED, fontSize: 13 },
   categoryTextSelected: { color: '#FFFFFF', fontWeight: '800' },
+  pinButton: { alignSelf: 'flex-start', borderWidth: 1, borderColor: BORDER, borderRadius: 14, paddingHorizontal: 14, paddingVertical: 10, marginTop: 8, backgroundColor: '#FFFFFF' },
+  pinButtonActive: { backgroundColor: '#FFF4CE', borderColor: '#F0C75E' },
+  pinText: { color: MUTED, fontSize: 13, fontWeight: '800' },
+  pinTextActive: { color: '#A86A00' },
   playButton: { alignSelf: 'flex-start', marginTop: 24, backgroundColor: ACCENT, borderRadius: 14, paddingHorizontal: 18, paddingVertical: 12 },
   playButtonText: { color: '#FFFFFF', fontWeight: '800', fontSize: 14 },
   statusCard: { backgroundColor: '#F5F3FA', borderRadius: 20, padding: 18, marginTop: 28 },
