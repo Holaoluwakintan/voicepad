@@ -1,4 +1,3 @@
-import AsyncStorage from '@react-native-async-storage/async-storage';
 import {
   AudioModule,
   RecordingPresets,
@@ -14,24 +13,11 @@ import { Alert, Pressable, StyleSheet, View } from 'react-native';
 
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
+import { insertNote, updateNote, Note, loadNotes } from '@/lib/notes';
 import { transcribeAudio } from '@/lib/transcription';
 
-const NOTES_KEY = '@voicepad/notes';
 const ACCENT = '#6D5DFB';
 const MUTED = '#918DA1';
-
-type VoiceNote = {
-  id: string;
-  title: string;
-  content: string;
-  audioUri: string;
-  source: 'voice';
-  category: 'Personal';
-  createdAt: string;
-  transcript?: string;
-  transcriptionStatus?: 'pending' | 'ready' | 'failed';
-  transcriptionError?: string;
-};
 
 export default function RecordScreen() {
   const router = useRouter();
@@ -73,9 +59,7 @@ export default function RecordScreen() {
       if (!uri) throw new Error('Missing recording URI');
       setSavedUri(uri);
 
-      const existing = await AsyncStorage.getItem(NOTES_KEY);
-      const notes: VoiceNote[] = existing ? JSON.parse(existing) : [];
-      const voiceNote: VoiceNote = {
+      const voiceNote: Note = {
         id: `voice-${Date.now()}`,
         title: `Voice note · ${new Date().toLocaleDateString()}`,
         content: 'Audio recording saved. Transcription is starting…',
@@ -85,9 +69,9 @@ export default function RecordScreen() {
         createdAt: new Date().toISOString(),
         transcriptionStatus: 'pending',
       };
-      await AsyncStorage.setItem(NOTES_KEY, JSON.stringify([voiceNote, ...notes]));
+      await insertNote(voiceNote);
       setTranscriptionStarted(true);
-      void transcribeSavedNote(uri, voiceNote.id, notes);
+      void transcribeSavedNote(uri, voiceNote.id);
     } catch {
       Alert.alert('Could not save recording', 'The recording could not be saved. Please try again.');
     } finally {
@@ -95,33 +79,20 @@ export default function RecordScreen() {
     }
   }
 
-  async function transcribeSavedNote(uri: string, noteId: string, previousNotes: VoiceNote[]) {
+  async function transcribeSavedNote(uri: string, noteId: string) {
     try {
       const result = await transcribeAudio(uri, { noteId });
-      const saved = await AsyncStorage.getItem(NOTES_KEY);
-      const currentNotes: VoiceNote[] = saved ? JSON.parse(saved) : previousNotes;
-      const updatedNotes = currentNotes.map((note) =>
-        note.id === noteId
-          ? {
-              ...note,
-              title: result.text.split(/[.!?\n]/)[0]?.trim().slice(0, 64) || note.title,
-              content: result.text,
-              transcript: result.text,
-              transcriptionStatus: 'ready' as const,
-            }
-          : note,
-      );
-      await AsyncStorage.setItem(NOTES_KEY, JSON.stringify(updatedNotes));
+      const current = (await loadNotes()).find((note) => note.id === noteId);
+      await updateNote(noteId, {
+        title: result.text.split(/[.!?\n]/)[0]?.trim().slice(0, 64) || current?.title || 'Voice note',
+        content: result.text,
+        transcript: result.text,
+        transcriptionStatus: 'ready',
+        transcriptionError: undefined,
+      });
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Unknown transcription error';
-      const saved = await AsyncStorage.getItem(NOTES_KEY);
-      const currentNotes: VoiceNote[] = saved ? JSON.parse(saved) : previousNotes;
-      const updatedNotes = currentNotes.map((note) =>
-        note.id === noteId
-          ? { ...note, transcriptionStatus: 'failed' as const, transcriptionError: message }
-          : note,
-      );
-      await AsyncStorage.setItem(NOTES_KEY, JSON.stringify(updatedNotes));
+      await updateNote(noteId, { transcriptionStatus: 'failed', transcriptionError: message });
     }
   }
 

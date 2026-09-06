@@ -1,4 +1,3 @@
-import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useAudioPlayer, useAudioPlayerStatus } from 'expo-audio';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useEffect, useState } from 'react';
@@ -7,7 +6,7 @@ import { Alert, Pressable, ScrollView, Share, StyleSheet, TextInput, View } from
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
 import { transcribeAudio } from '@/lib/transcription';
-import { getNoteCategory, NOTES_STORAGE_KEY, NOTE_CATEGORIES, Note, NoteCategory } from '@/lib/notes';
+import { getNoteCategory, loadNotes, updateNote, NOTE_CATEGORIES, Note, NoteCategory } from '@/lib/notes';
 
 const ACCENT = '#6D5DFB';
 const INK = '#17152A';
@@ -31,8 +30,7 @@ export default function NoteDetailScreen() {
   }, [id]);
 
   async function loadNote() {
-    const saved = await AsyncStorage.getItem(NOTES_STORAGE_KEY);
-    const notes: Note[] = saved ? JSON.parse(saved) : [];
+    const notes = await loadNotes();
     const found = notes.find((item) => item.id === id) ?? null;
     setNote(found);
     setTitle(found?.title ?? '');
@@ -44,13 +42,8 @@ export default function NoteDetailScreen() {
     if (!note) return;
     try {
       setIsSaving(true);
-      const saved = await AsyncStorage.getItem(NOTES_STORAGE_KEY);
-      const notes: Note[] = saved ? JSON.parse(saved) : [];
-      const updated = notes.map((item) =>
-        item.id === note.id ? { ...item, title: title.trim() || 'Untitled note', content: content.trim(), category } : item,
-      );
-      await AsyncStorage.setItem(NOTES_STORAGE_KEY, JSON.stringify(updated));
-      setNote((current) => current ? { ...current, title: title.trim() || 'Untitled note', content: content.trim(), category } : current);
+      const updated = await updateNote(note.id, { title: title.trim() || 'Untitled note', content: content.trim(), category });
+      setNote(updated);
       Alert.alert('Saved', 'Your note was updated.');
     } catch {
       Alert.alert('Could not save changes', 'Please try again.');
@@ -64,20 +57,13 @@ export default function NoteDetailScreen() {
     try {
       setIsRetrying(true);
       const result = await transcribeAudio(note.audioUri, { noteId: note.id });
-      const saved = await AsyncStorage.getItem(NOTES_STORAGE_KEY);
-      const notes: Note[] = saved ? JSON.parse(saved) : [];
-      const updated = notes.map((item) => item.id === note.id
-        ? {
-            ...item,
-            title: result.text.split(/[.!?\n]/)[0]?.trim().slice(0, 64) || item.title,
-            content: result.text,
-            transcript: result.text,
-            transcriptionStatus: 'ready' as const,
-            transcriptionError: undefined,
-          }
-        : item,
-      );
-      await AsyncStorage.setItem(NOTES_STORAGE_KEY, JSON.stringify(updated));
+      await updateNote(note.id, {
+        title: result.text.split(/[.!?\n]/)[0]?.trim().slice(0, 64) || note.title,
+        content: result.text,
+        transcript: result.text,
+        transcriptionStatus: 'ready',
+        transcriptionError: undefined,
+      });
       await loadNote();
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Transcription failed';
