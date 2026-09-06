@@ -1,11 +1,11 @@
 import { useFocusEffect, useRouter } from 'expo-router';
 import { useCallback, useMemo, useState } from 'react';
-import { FlatList, Pressable, StyleSheet, TextInput, View } from 'react-native';
+import { Alert, FlatList, Pressable, StyleSheet, TextInput, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
-import { getNoteCategory, loadNotes as loadStoredNotes, NOTE_CATEGORIES, Note, NoteCategory } from '@/lib/notes';
+import { getNoteCategory, loadNotes as loadStoredNotes, NOTE_CATEGORIES, Note, NoteCategory, removeNote } from '@/lib/notes';
 
 const BLUE = '#21499A';
 const INK = '#182235';
@@ -33,6 +33,13 @@ export default function NotesScreen() {
     setNotes(await loadStoredNotes());
   }
 
+  function confirmDelete(note: Note) {
+    Alert.alert('Delete note?', `“${note.title}” will be removed from this device.`, [
+      { text: 'Cancel', style: 'cancel' },
+      { text: 'Delete', style: 'destructive', onPress: async () => { await removeNote(note.id); loadNotes(); } },
+    ]);
+  }
+
   const filtered = useMemo(() => notes.filter((note) => {
     const matchesCategory = category === 'All' || getNoteCategory(note) === category;
     const text = `${note.title} ${note.content}`.toLowerCase();
@@ -53,7 +60,7 @@ export default function NotesScreen() {
             <FlatList horizontal data={['All', ...NOTE_CATEGORIES]} keyExtractor={(item) => item} showsHorizontalScrollIndicator={false} contentContainerStyle={styles.chips} renderItem={({ item }) => <Pressable onPress={() => setCategory(item as 'All' | NoteCategory)} style={[styles.chip, category === item && styles.selectedChip]}><ThemedText style={[styles.chipText, category === item && styles.selectedText]}>{item}</ThemedText></Pressable>} />
             <ThemedText style={styles.count}>{filtered.length} {filtered.length === 1 ? 'note' : 'notes'}</ThemedText>
           </>}
-          renderItem={({ item }) => { const noteCategory = getNoteCategory(item); const colors = CATEGORY_COLORS[noteCategory]; return <Pressable onPress={() => router.push(`/note/${item.id}`)} style={styles.card}><ThemedText style={[styles.category, { backgroundColor: colors.background, color: colors.text }]}>{item.pinned ? '★ ' : ''}{noteCategory}</ThemedText><ThemedText style={styles.noteTitle} numberOfLines={1}>{item.title}</ThemedText><ThemedText style={styles.preview} numberOfLines={2}>{item.content || 'Audio voice note'}</ThemedText><ThemedText style={styles.date}>{new Date(item.createdAt).toLocaleDateString()}</ThemedText></Pressable>; }}
+          renderItem={({ item }) => { const noteCategory = getNoteCategory(item); const colors = CATEGORY_COLORS[noteCategory]; return <Pressable onPress={() => router.push(`/note/${item.id}`)} style={styles.card}><View style={styles.cardTop}><ThemedText style={[styles.category, { backgroundColor: colors.background, color: colors.text }]}>{item.pinned ? '★ ' : ''}{noteCategory}</ThemedText><Pressable onPress={() => confirmDelete(item)} hitSlop={8} style={styles.deleteButton} accessibilityLabel={`Delete ${item.title}`}><ThemedText style={styles.deleteText}>Delete</ThemedText></Pressable></View><ThemedText style={styles.noteTitle} numberOfLines={1}>{item.title}</ThemedText><ThemedText style={styles.preview} numberOfLines={2}>{item.content || 'Audio voice note'}</ThemedText><ThemedText style={styles.date}>{new Date(item.createdAt).toLocaleDateString()}</ThemedText></Pressable>; }}
           ListEmptyComponent={<ThemedText style={styles.empty}>No notes match this filter.</ThemedText>}
         />
       </SafeAreaView>
@@ -75,9 +82,12 @@ const styles = StyleSheet.create({
   selectedText: { color: '#FFFFFF', fontWeight: '800' },
   count: { color: MUTED, fontSize: 13, marginBottom: 12 },
   card: { backgroundColor: '#FFFFFF', borderRadius: 20, borderWidth: 1, borderColor: BORDER, padding: 18, marginBottom: 12 },
+  cardTop: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
   category: { alignSelf: 'flex-start', borderRadius: 12, paddingHorizontal: 10, paddingVertical: 5, fontSize: 12, fontWeight: '800' },
   noteTitle: { color: INK, fontSize: 17, fontWeight: '800', marginTop: 10 },
   preview: { color: MUTED, fontSize: 14, lineHeight: 21, marginTop: 7 },
   date: { color: '#9AA4B2', fontSize: 12, marginTop: 12 },
   empty: { color: MUTED, textAlign: 'center', paddingVertical: 50 },
+  deleteButton: { borderWidth: 1, borderColor: '#F0C4CC', borderRadius: 10, paddingHorizontal: 9, paddingVertical: 5 },
+  deleteText: { color: '#C63E57', fontSize: 12, fontWeight: '800' },
 });

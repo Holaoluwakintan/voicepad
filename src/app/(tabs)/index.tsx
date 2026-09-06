@@ -57,7 +57,7 @@ function formatDuration(seconds?: number) {
   return `${minutes}:${String(seconds % 60).padStart(2, '0')}`;
 }
 
-function NoteCard({ item, onPress, onLongPress }: { item: Note; onPress: () => void; onLongPress: () => void }) {
+function NoteCard({ item, onPress, onLongPress, onDelete }: { item: Note; onPress: () => void; onLongPress: () => void; onDelete: () => void }) {
   const category = item.category ?? 'Personal';
   const colors = categoryColors[category];
   const preview = item.transcriptionStatus === 'pending'
@@ -82,6 +82,7 @@ function NoteCard({ item, onPress, onLongPress }: { item: Note; onPress: () => v
         <ThemedText style={styles.noteMetadata}>◷ {new Date(item.createdAt).toLocaleDateString(undefined, { day: 'numeric', month: 'short' })}</ThemedText>
         <ThemedText style={styles.noteMetadata}>{wordCount} words</ThemedText>
         {item.pinned && <ThemedText style={styles.star}>★</ThemedText>}
+        <Pressable onPress={onDelete} hitSlop={8} style={styles.deleteButton} accessibilityLabel={`Delete ${item.title}`}><ThemedText style={styles.deleteText}>Delete</ThemedText></Pressable>
       </View>
     </Pressable>
   );
@@ -163,7 +164,7 @@ export default function HomeScreen() {
   }
 
   function renderNote({ item }: { item: Note }) {
-    return <NoteCard item={item} onPress={() => router.push(`/note/${item.id}`)} onLongPress={() => selectNote(item)} />;
+    return <NoteCard item={item} onPress={() => router.push(`/note/${item.id}`)} onLongPress={() => selectNote(item)} onDelete={() => deleteNote(item)} />;
   }
 
   function sectionHeader(label: string, count: number) {
@@ -176,7 +177,7 @@ export default function HomeScreen() {
         <FlatList
           data={pinnedNotes.length ? [...pinnedNotes, ...recentNotes] : recentNotes}
           keyExtractor={(item) => item.id}
-          renderItem={({ item, index }) => <>{index === 0 && pinnedNotes.length > 0 && sectionHeader('Pinned', pinnedNotes.length)}{index === pinnedNotes.length && recentNotes.length > 0 && sectionHeader('Recent Notes', filteredNotes.length)}<NoteCard item={item} onPress={() => router.push(`/note/${item.id}`)} onLongPress={() => selectNote(item)} /></>}
+            renderItem={({ item, index }) => <>{index === 0 && pinnedNotes.length > 0 && sectionHeader('Pinned', pinnedNotes.length)}{index === pinnedNotes.length && recentNotes.length > 0 && sectionHeader('Recent Notes', filteredNotes.length)}<NoteCard item={item} onPress={() => router.push(`/note/${item.id}`)} onLongPress={() => selectNote(item)} onDelete={() => deleteNote(item)} /></>}
           showsVerticalScrollIndicator={false}
           contentContainerStyle={styles.content}
           ListHeaderComponent={
@@ -247,6 +248,8 @@ const styles = StyleSheet.create({
   noteBottomRow: { flexDirection: 'row', alignItems: 'center', gap: 18, marginTop: 18 },
   noteMetadata: { color: '#9AA4B2', fontSize: 13 },
   star: { marginLeft: 'auto', color: '#F28B22', fontSize: 18 },
+  deleteButton: { marginLeft: 'auto', borderWidth: 1, borderColor: '#F0C4CC', borderRadius: 10, paddingHorizontal: 9, paddingVertical: 5 },
+  deleteText: { color: '#C63E57', fontSize: 12, fontWeight: '800' },
   emptyState: { backgroundColor: '#FFFFFF', borderRadius: 22, padding: 28, alignItems: 'center' },
   emptyTitle: { color: INK, fontSize: 18, fontWeight: '800' },
   emptySubtitle: { color: MUTED, marginTop: 8 },
