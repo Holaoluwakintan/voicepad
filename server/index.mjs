@@ -50,7 +50,12 @@ function rateLimitMiddleware(req, res, next) {
 app.post('/transcribe', rateLimitMiddleware, upload.single('file'), async (req, res) => {
   if (!process.env.GROQ_API_KEY) return res.status(500).json({ error: 'GROQ_API_KEY is not configured on the server.' });
   if (!req.file) return res.status(400).json({ error: 'Audio file is required.' });
-  if (!req.file.mimetype.startsWith('audio/') && !req.file.mimetype.startsWith('video/')) return res.status(400).json({ error: 'Unsupported audio format.' });
+  const isAudio =
+    req.file.mimetype.startsWith('audio/') ||
+    req.file.mimetype.startsWith('video/') ||
+    req.file.mimetype === 'application/octet-stream' ||
+    /\.(m4a|mp4|webm|ogg|wav|mp3|aac)$/i.test(req.file.originalname || '');
+  if (!isAudio) return res.status(400).json({ error: 'Unsupported audio format.' });
 
   const mode = req.body?.mode === 'original' ? 'original' : 'english';
   const endpoint = mode === 'english' ? 'translations' : 'transcriptions';

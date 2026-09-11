@@ -9,6 +9,7 @@ import {
   View,
   KeyboardAvoidingView,
   Platform,
+  Text,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import * as Haptics from 'expo-haptics';
@@ -110,10 +111,20 @@ export default function ProfileScreen() {
     setBusy(false);
 
     if (result.error) {
-      Alert.alert(
-        `${provider === 'google' ? 'Google' : 'Apple'} Sign In`,
-        result.error
-      );
+      const isUnsupported =
+        result.error.toLowerCase().includes('unsupported') ||
+        result.error.toLowerCase().includes('disabled');
+      if (isUnsupported) {
+        Alert.alert(
+          `${provider === 'google' ? 'Google' : 'Apple'} Sign-In`,
+          `${provider === 'google' ? 'Google' : 'Apple'} login is not enabled in your Supabase dashboard yet.\n\nPlease sign in or create an account using your email and password below!`
+        );
+      } else {
+        Alert.alert(
+          `${provider === 'google' ? 'Google' : 'Apple'} Sign In`,
+          result.error
+        );
+      }
     }
   }
 
@@ -309,10 +320,10 @@ export default function ProfileScreen() {
               </Pressable>
 
               <Pressable disabled={busy} onPress={() => handleAuth('signIn')} style={styles.primaryButton}>
-                <ThemedText style={styles.primaryText}>{busy ? 'Please wait…' : 'Sign in'}</ThemedText>
+                <Text style={styles.primaryText}>{busy ? 'Signing in…' : '✉️  Sign In with Email'}</Text>
               </Pressable>
               <Pressable disabled={busy} onPress={() => handleAuth('signUp')} style={styles.secondaryButton}>
-                <ThemedText style={styles.secondaryText}>Create account</ThemedText>
+                <Text style={styles.secondaryText}>{busy ? 'Please wait…' : '✨  Create Account'}</Text>
               </Pressable>
             </View>
           )}
@@ -324,11 +335,11 @@ export default function ProfileScreen() {
                 Your voice notes and audio recordings are securely synced to your private Supabase cloud workspace.
               </ThemedText>
               <View style={styles.accountActions}>
-                <Pressable disabled={busy} onPress={handleSync} style={styles.primaryButton}>
-                  <ThemedText style={styles.primaryText}>{busy ? 'Syncing…' : 'Sync now'}</ThemedText>
+                <Pressable disabled={busy} onPress={handleSync} style={[styles.primaryButton, styles.flexAction]}>
+                  <Text style={styles.primaryText}>{busy ? 'Syncing…' : 'Sync now'}</Text>
                 </Pressable>
-                <Pressable disabled={busy} onPress={handleSignOut} style={styles.secondaryButton}>
-                  <ThemedText style={styles.secondaryText}>Sign out</ThemedText>
+                <Pressable disabled={busy} onPress={handleSignOut} style={[styles.secondaryButton, styles.flexAction, { backgroundColor: '#DC2626' }]}>
+                  <Text style={styles.secondaryText}>Sign out</Text>
                 </Pressable>
               </View>
               <Pressable disabled={busy} onPress={confirmDeleteAccount} style={styles.deleteAccountButton}>
@@ -475,10 +486,37 @@ const styles = StyleSheet.create({
   input: { height: 52, borderWidth: 1, borderColor: '#E1E7F0', borderRadius: 14, paddingHorizontal: 16, color: '#182235', marginTop: 10, backgroundColor: '#FAFBFD' },
   forgotButton: { alignSelf: 'flex-end', marginTop: 8 },
   forgotText: { color: '#21499A', fontSize: 13, fontWeight: '600' },
-  primaryButton: { backgroundColor: '#21499A', borderRadius: 14, alignItems: 'center', paddingVertical: 14, marginTop: 14, flex: 1 },
-  primaryText: { color: '#FFFFFF', fontWeight: '800', fontSize: 15 },
-  secondaryButton: { borderWidth: 1, borderColor: '#B9C7DD', borderRadius: 14, alignItems: 'center', paddingVertical: 13, marginTop: 10, flex: 1 },
-  secondaryText: { color: '#21499A', fontWeight: '800', fontSize: 15 },
+  primaryButton: {
+    backgroundColor: '#2563EB',
+    borderRadius: 14,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 15,
+    marginTop: 14,
+    width: '100%',
+    elevation: 2,
+    shadowColor: '#2563EB',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.2,
+    shadowRadius: 4,
+  },
+  primaryText: { color: '#FFFFFF', fontWeight: '800', fontSize: 16, textAlign: 'center' },
+  secondaryButton: {
+    backgroundColor: '#7C3AED',
+    borderRadius: 14,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 15,
+    marginTop: 10,
+    width: '100%',
+    elevation: 2,
+    shadowColor: '#7C3AED',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.2,
+    shadowRadius: 4,
+  },
+  secondaryText: { color: '#FFFFFF', fontWeight: '800', fontSize: 16, textAlign: 'center' },
+  flexAction: { flex: 1, width: 'auto' as any, marginTop: 0 },
   deleteAccountButton: { marginTop: 16, alignItems: 'center', paddingVertical: 10 },
   deleteAccountText: { color: '#DC2626', fontSize: 13, fontWeight: '700' },
   accountActions: { flexDirection: 'row', gap: 10 },
