@@ -2,37 +2,90 @@ import {
   AudioModule,
   RecordingPresets,
   setAudioModeAsync,
-  useAudioPlayer,
-  useAudioPlayerStatus,
   useAudioRecorder,
   useAudioRecorderState,
 } from 'expo-audio';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useEffect, useState } from 'react';
 import { Alert, Pressable, StyleSheet, View } from 'react-native';
+import * as Haptics from 'expo-haptics';
+import Animated, {
+  useSharedValue,
+  useAnimatedStyle,
+  withRepeat,
+  withSequence,
+  withTiming,
+  Easing,
+} from 'react-native-reanimated';
 
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
-import { insertNote, updateNote, Note, loadNotes, NoteCategory } from '@/lib/notes';
+import { AudioWaveform } from '@/components/audio-waveform';
+import { AudioPlayerView } from '@/components/audio-player-view';
+import { insertNote, updateNote, Note, loadNotes, NoteCategory, removeNote } from '@/lib/notes';
 import { transcribeAudio } from '@/lib/transcription';
+import { uploadAudioToCloud } from '@/lib/storage';
+import { useAuth } from '@/lib/auth';
 
 const ACCENT = '#6D5DFB';
 const MUTED = '#918DA1';
+const DANGER = '#EF5472';
 
 export default function RecordScreen() {
   const router = useRouter();
+  const { user } = useAuth();
   const { category: categoryParam } = useLocalSearchParams<{ category?: string }>();
   const selectedCategory: NoteCategory = categoryParam && ['Lectures', 'Sermons', 'Meetings', 'Personal'].includes(categoryParam)
-    ? categoryParam as NoteCategory
+    ? (categoryParam as NoteCategory)
     : 'Personal';
-  const recorder = useAudioRecorder({ ...RecordingPresets.HIGH_QUALITY, directory: 'document' });
+
+  const recorder = useAudioRecorder({
+    ...RecordingPresets.HIGH_QUALITY,
+    directory: 'document',
+    isMeteringEnabled: true,
+  });
   const recorderState = useAudioRecorderState(recorder);
   const [permission, setPermission] = useState<'checking' | 'granted' | 'denied'>('checking');
   const [savedUri, setSavedUri] = useState<string | null>(null);
+  const [savedNoteId, setSavedNoteId] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [transcriptionStarted, setTranscriptionStarted] = useState(false);
-  const player = useAudioPlayer(savedUri);
-  const playerStatus = useAudioPlayerStatus(player);
+
+  // Pulse animation for recording state
+  const pulseScale = useSharedValue(1);
+  const pulseOpacity = useSharedValue(0);
+
+  const isRecording = recorderState.isRecording;
+  const elapsed = recorderState.durationMillis ?? 0;
+
+  useEffect(() => {
+    if (isRecording) {
+      pulseScale.value = withRepeat(
+        withSequence(
+          withTiming(1.32, { duration: 900, easing: Easing.out(Easing.ease) }),
+          withTiming(1, { duration: 900, easing: Easing.in(Easing.ease) })
+        ),
+        -1,
+        true
+      );
+      pulseOpacity.value = withRepeat(
+        withSequence(
+          withTiming(0.2, { duration: 900 }),
+          withTiming(0.7, { duration: 900 })
+        ),
+        -1,
+        true
+      );
+    } else {
+      pulseScale.value = withTiming(1, { duration: 250 });
+      pulseOpacity.value = withTiming(0, { duration: 250 });
+    }
+  }, [isRecording]);
+
+  const pulseStyle = useAnimatedStyle(() => ({
+    transform: [{ scale: pulseScale.value }],
+    opacity: pulseOpacity.value,
+  }));
 
   useEffect(() => {
     (async () => {
@@ -48,6 +101,7 @@ export default function RecordScreen() {
       return;
     }
     try {
+      await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Heavy);
       await recorder.prepareToRecordAsync();
       recorder.record();
     } catch {
@@ -58,24 +112,44 @@ export default function RecordScreen() {
   async function stop() {
     try {
       setSaving(true);
+      await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+      const recordedDurationSeconds = Math.max(1, Math.round((recorderState.durationMillis || elapsed) / 1000));
       await recorder.stop();
       const uri = recorder.uri;
       if (!uri) throw new Error('Missing recording URI');
       setSavedUri(uri);
 
+      const noteId = `voice-${Date.now()}`;
+      setSavedNoteId(noteId);
+
       const voiceNote: Note = {
-        id: `voice-${Date.now()}`,
-        title: `Voice note · ${new Date().toLocaleDateString()}`,
+        id: noteId,
+        title: `Voice note · ${new Date().toLocaleDateString(undefined, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}`,
         content: 'Audio recording saved. Transcription is starting…',
         audioUri: uri,
         source: 'voice',
         category: selectedCategory,
+        durationSeconds: recordedDurationSeconds,
         createdAt: new Date().toISOString(),
         transcriptionStatus: 'pending',
       };
+
       await insertNote(voiceNote);
       setTranscriptionStarted(true);
-      void transcribeSavedNote(uri, voiceNote.id);
+
+      // Background audio upload to Supabase Storage if user is signed in
+      if (user?.id) {
+        uploadAudioToCloud(user.id, noteId, uri)
+          .then((uploadedPath) => {
+            if (uploadedPath) {
+              updateNote(noteId, { audioPath: uploadedPath });
+            }
+          })
+          .catch(() => {});
+      }
+
+      // Background transcription
+      void transcribeSavedNote(uri, noteId);
     } catch {
       Alert.alert('Could not save recording', 'The recording could not be saved. Please try again.');
     } finally {
@@ -100,14 +174,32 @@ export default function RecordScreen() {
     }
   }
 
-  function playPause() {
-    if (!savedUri) return;
-    playerStatus.playing ? player.pause() : player.play();
+  async function discardRecording() {
+    try {
+      await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning);
+    } catch {}
+
+    if (savedNoteId) {
+      await removeNote(savedNoteId);
+    }
+    router.back();
   }
 
-  const isRecording = recorderState.isRecording;
-  const elapsed = recorderState.durationMillis ?? 0;
-  const time = `${String(Math.floor(elapsed / 60000)).padStart(2, '0')}:${String(Math.floor((elapsed % 60000) / 1000)).padStart(2, '0')}`;
+  function goToSavedNote() {
+    try {
+      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+    } catch {}
+
+    if (savedNoteId) {
+      router.replace(`/note/${savedNoteId}`);
+    } else {
+      router.back();
+    }
+  }
+
+  const time = `${String(Math.floor(elapsed / 60000)).padStart(2, '0')}:${String(
+    Math.floor((elapsed % 60000) / 1000)
+  ).padStart(2, '0')}`;
 
   return (
     <ThemedView style={styles.container}>
@@ -122,31 +214,59 @@ export default function RecordScreen() {
 
         <View style={styles.center}>
           <ThemedText style={styles.status}>
-            {isRecording ? 'Recording' : saving ? 'Saving audio…' : transcriptionStarted ? 'Transcription started' : savedUri ? 'Saved to VoicePad' : permission === 'denied' ? 'Microphone unavailable' : 'Ready when you are'}
+            {isRecording
+              ? 'Recording in progress…'
+              : saving
+              ? 'Saving audio…'
+              : transcriptionStarted
+              ? 'Transcribing in background'
+              : savedUri
+              ? 'Saved to VoicePad'
+              : permission === 'denied'
+              ? 'Microphone unavailable'
+              : 'Ready when you are'}
           </ThemedText>
+
           <ThemedText style={styles.timer}>{time}</ThemedText>
-          <View style={styles.waveform}>
-            {[24, 42, 30, 62, 38, 76, 46, 30, 54, 34, 68, 42, 24].map((height, i) => (
-              <View key={i} style={[styles.wave, { height: isRecording ? height : 12, opacity: isRecording ? 1 : 0.45 }]} />
-            ))}
-          </View>
+
+          {/* Live Reactive Audio Waveform */}
+          <AudioWaveform isRecording={isRecording} metering={recorderState.metering} height={90} />
         </View>
 
         <View style={styles.controls}>
           {savedUri && !isRecording && (
-            <Pressable onPress={playPause} style={styles.playButton} accessibilityLabel={playerStatus.playing ? 'Pause recording' : 'Play recording'}>
-              <ThemedText style={styles.playText}>{playerStatus.playing ? 'Pause recording' : 'Play recording'}</ThemedText>
-            </Pressable>
+            <View style={styles.postRecordActions}>
+              <View style={styles.previewBox}>
+                <AudioPlayerView source={savedUri} />
+              </View>
+
+              <Pressable onPress={goToSavedNote} style={styles.viewNoteButton}>
+                <ThemedText style={styles.viewNoteText}>Open note ➔</ThemedText>
+              </Pressable>
+
+              <Pressable onPress={discardRecording} style={styles.discardButton}>
+                <ThemedText style={styles.discardText}>Discard recording</ThemedText>
+              </Pressable>
+            </View>
           )}
-          <Pressable
-            onPress={isRecording ? stop : start}
-            disabled={saving}
-            style={({ pressed }) => [styles.recordButton, pressed && styles.pressed]}
-            accessibilityLabel={isRecording ? 'Stop recording' : 'Start recording'}
-          >
-            {isRecording ? <View style={styles.stopSquare} /> : <View style={styles.recordDot} />}
-          </Pressable>
-          <ThemedText style={styles.hint}>{saving ? 'Saving voice note…' : isRecording ? 'Tap to stop' : savedUri ? 'Transcription is running in the background' : 'Tap to start'}</ThemedText>
+
+          {!savedUri && (
+            <View style={styles.recordButtonWrapper}>
+              {/* Animated pulse ring */}
+              <Animated.View style={[styles.pulseRing, pulseStyle]} pointerEvents="none" />
+
+              <Pressable
+                onPress={isRecording ? stop : start}
+                disabled={saving}
+                style={({ pressed }) => [styles.recordButton, pressed && styles.pressed]}
+                accessibilityLabel={isRecording ? 'Stop recording' : 'Start recording'}>
+                {isRecording ? <View style={styles.stopSquare} /> : <View style={styles.recordDot} />}
+              </Pressable>
+              <ThemedText style={styles.hint}>
+                {saving ? 'Saving voice note…' : isRecording ? 'Tap to finish recording' : 'Tap to start recording'}
+              </ThemedText>
+            </View>
+          )}
         </View>
       </View>
     </ThemedView>
@@ -163,15 +283,57 @@ const styles = StyleSheet.create({
   spacer: { width: 44 },
   center: { flex: 1, alignItems: 'center', justifyContent: 'center' },
   status: { color: MUTED, fontSize: 15, fontWeight: '700', textAlign: 'center' },
-  timer: { color: '#FFF', fontSize: 62, lineHeight: 74, fontWeight: '800', marginTop: 12 },
-  waveform: { height: 100, flexDirection: 'row', alignItems: 'center', gap: 7, marginTop: 48 },
-  wave: { width: 7, borderRadius: 5, backgroundColor: ACCENT },
+  timer: { color: '#FFF', fontSize: 62, lineHeight: 74, fontWeight: '800', marginTop: 8, marginBottom: 28 },
   controls: { alignItems: 'center' },
-  recordButton: { width: 86, height: 86, borderRadius: 43, backgroundColor: '#FFF', alignItems: 'center', justifyContent: 'center', borderWidth: 8, borderColor: 'rgba(109,93,251,0.35)' },
-  recordDot: { width: 31, height: 31, borderRadius: 16, backgroundColor: '#EF5472' },
-  stopSquare: { width: 27, height: 27, borderRadius: 6, backgroundColor: '#EF5472' },
+  recordButtonWrapper: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    position: 'relative',
+    width: 140,
+    height: 140,
+  },
+  pulseRing: {
+    position: 'absolute',
+    width: 120,
+    height: 120,
+    borderRadius: 60,
+    backgroundColor: 'rgba(239, 84, 114, 0.4)',
+  },
+  recordButton: {
+    width: 86,
+    height: 86,
+    borderRadius: 43,
+    backgroundColor: '#FFF',
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 8,
+    borderColor: 'rgba(109,93,251,0.35)',
+    zIndex: 10,
+  },
+  recordDot: { width: 31, height: 31, borderRadius: 16, backgroundColor: DANGER },
+  stopSquare: { width: 27, height: 27, borderRadius: 6, backgroundColor: DANGER },
   pressed: { transform: [{ scale: 0.94 }], opacity: 0.9 },
-  playButton: { paddingHorizontal: 20, paddingVertical: 12, borderRadius: 14, backgroundColor: 'rgba(255,255,255,0.12)', marginBottom: 18 },
-  playText: { color: '#FFF', fontSize: 14, fontWeight: '800' },
-  hint: { color: MUTED, fontSize: 13, marginTop: 16, textAlign: 'center' },
+  postRecordActions: {
+    width: '100%',
+    alignItems: 'center',
+    gap: 12,
+  },
+  previewBox: {
+    width: '100%',
+    marginBottom: 8,
+  },
+  viewNoteButton: {
+    width: '100%',
+    paddingVertical: 16,
+    borderRadius: 16,
+    backgroundColor: ACCENT,
+    alignItems: 'center',
+  },
+  viewNoteText: { color: '#FFF', fontSize: 16, fontWeight: '800' },
+  discardButton: {
+    paddingVertical: 10,
+    paddingHorizontal: 20,
+  },
+  discardText: { color: MUTED, fontSize: 14, fontWeight: '600' },
+  hint: { color: MUTED, fontSize: 13, marginTop: 18, textAlign: 'center', position: 'absolute', bottom: -28, width: 200 },
 });

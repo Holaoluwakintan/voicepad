@@ -1,8 +1,9 @@
 import { Platform } from 'react-native';
 
+const defaultUrl = 'https://voicepad-transcription.onrender.com';
+
 const TRANSCRIPTION_API_URL =
-  process.env.EXPO_PUBLIC_TRANSCRIPTION_API_URL ??
-  (Platform.OS === 'web' ? 'http://localhost:8787' : 'http://10.0.2.2:8787');
+  process.env.EXPO_PUBLIC_TRANSCRIPTION_API_URL?.trim() || defaultUrl;
 
 export type TranscriptionResult = {
   text: string;
@@ -27,7 +28,11 @@ export async function transcribeAudio(
     } catch {
       throw new Error('Could not read the browser recording. Please record again and try once more.');
     }
-    const extension = audioBlob.type.includes('ogg') ? 'ogg' : 'webm';
+    const extension = audioBlob.type.includes('ogg')
+      ? 'ogg'
+      : audioBlob.type.includes('mp4')
+      ? 'm4a'
+      : 'webm';
     form.append('file', audioBlob, `voicepad-${options.noteId}.${extension}`);
   } else {
     form.append('file', {
@@ -39,7 +44,8 @@ export async function transcribeAudio(
 
   let response: Response;
   const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), 45_000);
+  // 75 seconds timeout to accommodate Render / free tier cold start times
+  const timeout = setTimeout(() => controller.abort(), 75_000);
   try {
     response = await fetch(`${TRANSCRIPTION_API_URL}/transcribe`, {
       method: 'POST',
@@ -48,9 +54,11 @@ export async function transcribeAudio(
     });
   } catch (error) {
     if (error instanceof Error && error.name === 'AbortError') {
-      throw new Error('Transcription timed out after 45 seconds. Your audio is still saved; please retry.');
+      throw new Error('Transcription timed out. The server may still be waking up. Your audio is saved; please retry.');
     }
-    throw new Error(`Could not reach the transcription server at ${TRANSCRIPTION_API_URL}. Check that it is running and restart Expo after changing .env.`);
+    throw new Error(
+      `Could not reach the transcription server at ${TRANSCRIPTION_API_URL}. Verify the server is running or set EXPO_PUBLIC_TRANSCRIPTION_API_URL in your .env.`
+    );
   } finally {
     clearTimeout(timeout);
   }
@@ -59,14 +67,11 @@ export async function transcribeAudio(
   if (!response.ok) {
     throw new Error(payload?.error ?? `Transcription failed (${response.status})`);
   }
-
   if (!payload?.text || typeof payload.text !== 'string') {
-    throw new Error('The transcription server returned no transcript.');
+    throw new Error('Server returned an empty transcript.');
   }
 
-  return payload as TranscriptionResult;
-}
-
-export function getTranscriptionApiUrl() {
-  return TRANSCRIPTION_API_URL;
+  return {
+    text: payload.text.trim(),
+  };
 }

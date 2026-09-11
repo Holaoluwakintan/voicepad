@@ -1,4 +1,3 @@
-import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useCallback, useMemo, useState } from 'react';
 import {
   Alert,
@@ -7,134 +6,183 @@ import {
   Modal,
   Platform,
   Pressable,
+  RefreshControl,
   ScrollView,
+  Share,
   StyleSheet,
   TextInput,
   View,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useFocusEffect, useRouter } from 'expo-router';
+import * as Haptics from 'expo-haptics';
+import Animated, { FadeInDown } from 'react-native-reanimated';
 
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
-import { NoteCategory } from '@/lib/notes';
+import { loadNotes, insertNote, removeNote, Note, NoteCategory, formatDuration } from '@/lib/notes';
+import { CategoryColors } from '@/constants/theme';
+import { useAuth } from '@/lib/auth';
 
-const STORAGE_KEY = '@voicepad/notes';
 const ACCENT = '#21499A';
 const ORANGE = '#FF7A00';
 const INK = '#182235';
 const MUTED = '#687384';
 const CANVAS = '#F1F5FB';
 const BORDER = '#E1E7F0';
+const DANGER = '#DC2626';
 
-type Category = NoteCategory;
-type Note = {
-  id: string;
-  title: string;
-  content: string;
-  createdAt: string;
-  audioUri?: string;
-  source?: 'voice' | 'text';
-  category?: Category;
-  durationSeconds?: number;
-  pinned?: boolean;
-  transcript?: string;
-  transcriptionStatus?: 'pending' | 'ready' | 'failed';
-  transcriptionError?: string;
-};
+const categories: Array<'All' | NoteCategory> = ['All', 'Lectures', 'Sermons', 'Meetings', 'Personal'];
 
-const categories: Array<'All' | Category> = ['All', 'Lectures', 'Sermons', 'Meetings', 'Personal'];
-const categoryColors: Record<Category, { background: string; text: string; dot: string }> = {
-  Lectures: { background: '#DCEBFF', text: '#315A9A', dot: '#254A9E' },
-  Sermons: { background: '#D7F7E8', text: '#24835A', dot: '#17A05E' },
-  Meetings: { background: '#FFF0B2', text: '#B57500', dot: '#C77C00' },
-  Personal: { background: '#EDE7FF', text: '#6D5DFB', dot: '#6D5DFB' },
-};
-
-function formatDuration(seconds?: number) {
-  if (!seconds) return '00:00';
-  const minutes = Math.floor(seconds / 60);
-  return `${minutes}:${String(seconds % 60).padStart(2, '0')}`;
+function formatNoteDate(dateString: string) {
+  try {
+    const date = new Date(dateString);
+    const now = new Date();
+    const isToday = date.toDateString() === now.toDateString();
+    const time = date.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+    if (isToday) return `Today, ${time}`;
+    return `${date.toLocaleDateString(undefined, { month: 'short', day: 'numeric' })} · ${time}`;
+  } catch {
+    return dateString;
+  }
 }
 
-function NoteCard({ item, onPress, onLongPress, onDelete }: { item: Note; onPress: () => void; onLongPress: () => void; onDelete: () => void }) {
+function NoteCard({
+  item,
+  index,
+  onPress,
+  onLongPress,
+}: {
+  item: Note;
+  index: number;
+  onPress: () => void;
+  onLongPress: () => void;
+}) {
   const category = item.category ?? 'Personal';
-  const colors = categoryColors[category];
-  const preview = item.transcriptionStatus === 'pending'
-    ? 'Transcribing your voice note…'
-    : item.transcriptionStatus === 'failed'
+  const colors = CategoryColors[category] ?? CategoryColors.Personal;
+  const preview =
+    item.transcriptionStatus === 'pending'
+      ? 'Transcribing your voice note…'
+      : item.transcriptionStatus === 'failed'
       ? `Transcription failed: ${item.transcriptionError || 'Tap to retry.'}`
+      : item.summary
+      ? `✨ ${item.summary.replace(/^###[^\n]+\n/g, '').slice(0, 140)}…`
       : item.content || 'Audio voice note';
-  const wordCount = item.content.trim() ? item.content.trim().split(/\s+/).length : 0;
+  const wordCount = item.content?.trim() ? item.content.trim().split(/\s+/).length : 0;
+  const hasAudio = Boolean(item.audioUri || item.audioPath);
 
   return (
-    <Pressable onPress={onPress} onLongPress={onLongPress} style={({ pressed }) => [styles.noteCard, pressed && styles.pressed]}>
-      <View style={styles.noteTopRow}>
-        <ThemedText style={[styles.categoryPill, { backgroundColor: colors.background, color: colors.text }]}>{category}</ThemedText>
-        <View style={styles.noteMetaTop}>
-          <View style={[styles.statusDot, { backgroundColor: colors.dot }]} />
-          {item.audioUri && <ThemedText style={styles.duration}>◷ {formatDuration(item.durationSeconds)}</ThemedText>}
+    <Animated.View entering={FadeInDown.duration(280).delay(Math.min(index * 35, 200))}>
+      <Pressable
+        onPress={onPress}
+        onLongPress={onLongPress}
+        style={({ pressed }) => [styles.noteCard, pressed && styles.pressed]}>
+        <View style={styles.noteTopRow}>
+          <View
+            style={[
+              styles.categoryPill,
+              { backgroundColor: colors.badgeBg, borderColor: colors.border },
+            ]}>
+            <ThemedText style={[styles.categoryIcon]}>{colors.icon}</ThemedText>
+            <ThemedText style={[styles.categoryPillText, { color: colors.badgeText }]}>
+              {category}
+            </ThemedText>
+          </View>
+          <View style={styles.noteMetaTop}>
+            <View style={[styles.statusDot, { backgroundColor: colors.dot }]} />
+            {hasAudio && (
+              <View style={styles.durationBadge}>
+                <ThemedText style={styles.durationText}>
+                  ⏱ {formatDuration(item.durationSeconds)}
+                </ThemedText>
+              </View>
+            )}
+          </View>
         </View>
-      </View>
-      <ThemedText style={styles.noteTitle} numberOfLines={1}>{item.title}</ThemedText>
-      <ThemedText style={styles.notePreview} numberOfLines={2}>{preview}</ThemedText>
-      <View style={styles.noteBottomRow}>
-        <ThemedText style={styles.noteMetadata}>◷ {new Date(item.createdAt).toLocaleDateString(undefined, { day: 'numeric', month: 'short' })}</ThemedText>
-        <ThemedText style={styles.noteMetadata}>{wordCount} words</ThemedText>
-        {item.pinned && <ThemedText style={styles.star}>★</ThemedText>}
-        <Pressable onPress={onDelete} hitSlop={8} style={styles.deleteButton} accessibilityLabel={`Delete ${item.title}`}><ThemedText style={styles.deleteText}>Delete</ThemedText></Pressable>
-      </View>
-    </Pressable>
+
+        <ThemedText style={styles.noteTitle} numberOfLines={1}>
+          {item.title}
+        </ThemedText>
+        <ThemedText style={styles.notePreview} numberOfLines={2}>
+          {preview}
+        </ThemedText>
+
+        <View style={styles.noteBottomRow}>
+          <ThemedText style={styles.noteMetadata}>
+            {formatNoteDate(item.createdAt)}
+          </ThemedText>
+          {wordCount > 0 && (
+            <ThemedText style={styles.noteMetadata}>{wordCount} words</ThemedText>
+          )}
+          {item.summary && <ThemedText style={styles.aiPill}>✨ AI Summary</ThemedText>}
+          {item.pinned && <ThemedText style={styles.star}>★</ThemedText>}
+        </View>
+      </Pressable>
+    </Animated.View>
   );
 }
 
 export default function HomeScreen() {
   const router = useRouter();
+  const { user } = useAuth();
   const [notes, setNotes] = useState<Note[]>([]);
   const [isLoading, setIsLoading] = useState(true);
+  const [isRefreshing, setIsRefreshing] = useState(false);
   const [isComposerOpen, setIsComposerOpen] = useState(false);
-  const [selectedCategory, setSelectedCategory] = useState<'All' | Category>('All');
+  const [selectedCategory, setSelectedCategory] = useState<'All' | NoteCategory>('All');
   const [search, setSearch] = useState('');
   const [selectedNote, setSelectedNote] = useState<Note | null>(null);
   const [title, setTitle] = useState('');
   const [content, setContent] = useState('');
 
-  useFocusEffect(
-    useCallback(() => {
-      loadNotes();
-      const refreshTimer = setInterval(loadNotes, 2000);
-      return () => clearInterval(refreshTimer);
-    }, []),
-  );
+  const userName =
+    user?.user_metadata?.full_name ||
+    (user?.email ? user.email.split('@')[0] : 'VoicePad User');
+  const userInitial = (userName[0] || 'V').toUpperCase();
 
-  async function loadNotes() {
+  const fetchNotes = useCallback(async () => {
     try {
-      const saved = await AsyncStorage.getItem(STORAGE_KEY);
-      if (saved) setNotes(JSON.parse(saved));
+      const items = await loadNotes();
+      setNotes(items);
     } catch {
-      Alert.alert('Could not load notes', 'Please restart VoicePad and try again.');
+      // Graceful fallback
     } finally {
       setIsLoading(false);
+      setIsRefreshing(false);
     }
-  }
+  }, []);
 
-  async function saveNotes(nextNotes: Note[]) {
-    setNotes(nextNotes);
-    await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(nextNotes));
-  }
+  useFocusEffect(
+    useCallback(() => {
+      fetchNotes();
+    }, [fetchNotes]),
+  );
 
-  const filteredNotes = useMemo(() => notes.filter((note) => {
-    const matchesCategory = selectedCategory === 'All' || (note.category ?? 'Personal') === selectedCategory;
-    const query = search.trim().toLowerCase();
-    return matchesCategory && (!query || `${note.title} ${note.content}`.toLowerCase().includes(query));
-  }), [notes, search, selectedCategory]);
-  const pinnedNotes = filteredNotes.filter((note) => note.pinned);
-  const recentNotes = filteredNotes.filter((note) => !note.pinned);
+  const onRefresh = useCallback(() => {
+    setIsRefreshing(true);
+    fetchNotes();
+  }, [fetchNotes]);
 
-  function openComposer() {
-    setTitle('');
-    setContent('');
-    setIsComposerOpen(true);
+  const filteredNotes = useMemo(() => {
+    return notes.filter((note) => {
+      const matchesCategory =
+        selectedCategory === 'All' || (note.category ?? 'Personal') === selectedCategory;
+      const query = search.trim().toLowerCase();
+      return (
+        matchesCategory &&
+        (!query || `${note.title} ${note.content} ${note.summary || ''}`.toLowerCase().includes(query))
+      );
+    });
+  }, [notes, search, selectedCategory]);
+
+  const pinnedNotes = useMemo(() => filteredNotes.filter((note) => note.pinned), [filteredNotes]);
+  const recentNotes = useMemo(() => filteredNotes.filter((note) => !note.pinned), [filteredNotes]);
+
+  async function handleCategorySelect(cat: 'All' | NoteCategory) {
+    try {
+      await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    } catch {}
+    setSelectedCategory(cat);
   }
 
   async function createNote() {
@@ -145,30 +193,70 @@ export default function HomeScreen() {
       return;
     }
     try {
-      await saveNotes([{ id: `${Date.now()}`, title: cleanTitle || 'Untitled note', content: cleanContent, createdAt: new Date().toISOString(), category: 'Personal', source: 'text' }, ...notes]);
+      const targetCategory = selectedCategory === 'All' ? 'Personal' : selectedCategory;
+      await insertNote({
+        id: `text-${Date.now()}`,
+        title: cleanTitle || 'Untitled note',
+        content: cleanContent,
+        createdAt: new Date().toISOString(),
+        category: targetCategory,
+        source: 'text',
+      });
+      try {
+        await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+      } catch {}
       setIsComposerOpen(false);
+      setTitle('');
+      setContent('');
+      await fetchNotes();
     } catch {
       Alert.alert('Could not save note', 'Your note could not be saved. Please try again.');
     }
   }
 
   function selectNote(note: Note) {
-    setSelectedNote((current) => current?.id === note.id ? null : note);
+    try {
+      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+    } catch {}
+    setSelectedNote((current) => (current?.id === note.id ? null : note));
   }
 
   function deleteNote(note: Note) {
-    Alert.alert('Delete note?', `“${note.title}” will be removed from this device.`, [
+    Alert.alert('Delete note?', `“${note.title}” will be removed.`, [
       { text: 'Cancel', style: 'cancel' },
-      { text: 'Delete', style: 'destructive', onPress: async () => { await saveNotes(notes.filter((item) => item.id !== note.id)); setSelectedNote(null); } },
+      {
+        text: 'Delete',
+        style: 'destructive',
+        onPress: async () => {
+          try {
+            await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning);
+          } catch {}
+          await removeNote(note.id);
+          setSelectedNote(null);
+          await fetchNotes();
+        },
+      },
     ]);
   }
 
-  function renderNote({ item }: { item: Note }) {
-    return <NoteCard item={item} onPress={() => router.push(`/note/${item.id}`)} onLongPress={() => selectNote(item)} onDelete={() => deleteNote(item)} />;
+  async function shareSelectedNote() {
+    if (!selectedNote) return;
+    try {
+      await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    } catch {}
+    await Share.share({
+      title: selectedNote.title,
+      message: `${selectedNote.title}\n\n${selectedNote.content}`,
+    });
   }
 
   function sectionHeader(label: string, count: number) {
-    return <View style={styles.sectionHeader}><ThemedText style={styles.sectionTitle}>{label}</ThemedText><ThemedText style={styles.countBadge}>{count}</ThemedText></View>;
+    return (
+      <View style={styles.sectionHeader}>
+        <ThemedText style={styles.sectionTitle}>{label}</ThemedText>
+        <ThemedText style={styles.countBadge}>{count}</ThemedText>
+      </View>
+    );
   }
 
   return (
@@ -177,34 +265,180 @@ export default function HomeScreen() {
         <FlatList
           data={pinnedNotes.length ? [...pinnedNotes, ...recentNotes] : recentNotes}
           keyExtractor={(item) => item.id}
-            renderItem={({ item, index }) => <>{index === 0 && pinnedNotes.length > 0 && sectionHeader('Pinned', pinnedNotes.length)}{index === pinnedNotes.length && recentNotes.length > 0 && sectionHeader('Recent Notes', filteredNotes.length)}<NoteCard item={item} onPress={() => router.push(`/note/${item.id}`)} onLongPress={() => selectNote(item)} onDelete={() => deleteNote(item)} /></>}
+          refreshControl={<RefreshControl refreshing={isRefreshing} onRefresh={onRefresh} tintColor={ACCENT} />}
+          renderItem={({ item, index }) => (
+            <>
+              {index === 0 && pinnedNotes.length > 0 && sectionHeader('Pinned', pinnedNotes.length)}
+              {index === pinnedNotes.length &&
+                recentNotes.length > 0 &&
+                sectionHeader('Recent Notes', recentNotes.length)}
+              <NoteCard
+                item={item}
+                index={index}
+                onPress={() => router.push(`/note/${item.id}`)}
+                onLongPress={() => selectNote(item)}
+              />
+            </>
+          )}
           showsVerticalScrollIndicator={false}
           contentContainerStyle={styles.content}
           ListHeaderComponent={
             <>
               <View style={styles.headerRow}>
-                <View style={styles.avatar}><ThemedText style={styles.avatarText}>M</ThemedText></View>
-                <View style={styles.greetingBlock}><ThemedText style={styles.greetingSmall}>Good evening</ThemedText><ThemedText style={styles.greetingName}>Michael</ThemedText></View>
+                <View style={styles.avatar}>
+                  <ThemedText style={styles.avatarText}>{userInitial}</ThemedText>
+                </View>
+                <View style={styles.greetingBlock}>
+                  <ThemedText style={styles.greetingSmall}>Welcome back</ThemedText>
+                  <ThemedText style={styles.greetingName}>{userName}</ThemedText>
+                </View>
                 <View style={styles.headerSpacer} />
-                <View style={styles.noteCount}><ThemedText style={styles.noteCountText}>☰ {notes.length} notes</ThemedText></View>
-                <View style={styles.bell}><ThemedText style={styles.bellText}>♧</ThemedText></View>
+                <Pressable onPress={() => router.push('/notes')} style={styles.noteCount}>
+                  <ThemedText style={styles.noteCountText}>☰ {notes.length} notes</ThemedText>
+                </Pressable>
+                <Pressable
+                  onPress={() => {
+                    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
+                    setIsComposerOpen(true);
+                  }}
+                  style={styles.bell}
+                  accessibilityLabel="New text note">
+                  <ThemedText style={styles.bellText}>✎</ThemedText>
+                </Pressable>
               </View>
-              <View style={styles.searchBox}><ThemedText style={styles.searchIcon}>⌕</ThemedText><TextInput value={search} onChangeText={setSearch} placeholder="Search your notes…" placeholderTextColor="#9AA4B2" style={styles.searchInput} /></View>
+
+              <View style={styles.searchBox}>
+                <ThemedText style={styles.searchIcon}>⌕</ThemedText>
+                <TextInput
+                  value={search}
+                  onChangeText={setSearch}
+                  placeholder="Search notes or AI summaries…"
+                  placeholderTextColor="#9AA4B2"
+                  style={styles.searchInput}
+                />
+              </View>
+
               <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.chips}>
-                {categories.map((category) => <Pressable key={category} onPress={() => setSelectedCategory(category)} style={[styles.chip, selectedCategory === category && styles.chipSelected]}><ThemedText style={[styles.chipText, selectedCategory === category && styles.chipTextSelected]}>{category}</ThemedText></Pressable>)}
+                {categories.map((category) => {
+                  const catColor = category !== 'All' ? CategoryColors[category] : null;
+                  return (
+                    <Pressable
+                      key={category}
+                      onPress={() => handleCategorySelect(category)}
+                      style={[
+                        styles.chip,
+                        selectedCategory === category && styles.chipSelected,
+                        selectedCategory === category && catColor ? { backgroundColor: catColor.badgeText, borderColor: catColor.badgeText } : null,
+                      ]}>
+                      <ThemedText
+                        style={[
+                          styles.chipText,
+                          selectedCategory === category && styles.chipTextSelected,
+                        ]}>
+                        {catColor ? `${catColor.icon} ` : ''}
+                        {category}
+                      </ThemedText>
+                    </Pressable>
+                  );
+                })}
               </ScrollView>
+
               {isLoading && <ThemedText style={styles.loading}>Loading your notes…</ThemedText>}
-              {!isLoading && filteredNotes.length === 0 && <View style={styles.emptyState}><ThemedText style={styles.emptyTitle}>Your notes start here</ThemedText><ThemedText style={styles.emptySubtitle}>Record a voice note or create a written note.</ThemedText></View>}
+
+              {!isLoading && filteredNotes.length === 0 && (
+                <View style={styles.emptyState}>
+                  <ThemedText style={styles.emptyIcon}>🎙️</ThemedText>
+                  <ThemedText style={styles.emptyTitle}>Capture your first voice note</ThemedText>
+                  <ThemedText style={styles.emptySubtitle}>
+                    Speak your lecture, sermon, meeting, or idea. VoicePad saves the audio, transcribes it, and generates AI summaries.
+                  </ThemedText>
+                  <Pressable
+                    onPress={() => {
+                      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium).catch(() => {});
+                      router.push({
+                        pathname: '/note/record',
+                        params: { category: selectedCategory === 'All' ? 'Personal' : selectedCategory },
+                      });
+                    }}
+                    style={styles.emptyCta}>
+                    <ThemedText style={styles.emptyCtaText}>Start recording now</ThemedText>
+                  </Pressable>
+                </View>
+              )}
             </>
           }
           ListFooterComponent={<View style={{ height: 110 }} />}
         />
-        <Pressable onPress={() => router.push({ pathname: '/note/record', params: { category: selectedCategory === 'All' ? 'Personal' : selectedCategory } })} style={({ pressed }) => [styles.fab, pressed && styles.fabPressed]} accessibilityLabel="Record a voice note"><ThemedText style={styles.fabText}>♩</ThemedText></Pressable>
-        {selectedNote && <View style={styles.actionTray}><View style={styles.thumbnail}><ThemedText style={styles.thumbnailText}>✦</ThemedText></View><Pressable onPress={() => Alert.alert('Share', 'Sharing will be connected in the next release.')} style={styles.actionButton}><ThemedText style={styles.actionText}>↗ Share</ThemedText></Pressable><Pressable onPress={() => { router.push(`/note/${selectedNote.id}`); setSelectedNote(null); }} style={styles.actionButton}><ThemedText style={styles.actionText}>✎ Edit</ThemedText></Pressable></View>}
+
+        <Pressable
+          onPress={() => {
+            Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium).catch(() => {});
+            router.push({
+              pathname: '/note/record',
+              params: { category: selectedCategory === 'All' ? 'Personal' : selectedCategory },
+            });
+          }}
+          style={({ pressed }) => [styles.fab, pressed && styles.fabPressed]}
+          accessibilityLabel="Record a voice note">
+          <ThemedText style={styles.fabText}>🎙️</ThemedText>
+        </Pressable>
+
+        {selectedNote && (
+          <View style={styles.actionTray}>
+            <View style={styles.thumbnail}>
+              <ThemedText style={styles.thumbnailText}>✦</ThemedText>
+            </View>
+            <Pressable onPress={shareSelectedNote} style={styles.actionButton}>
+              <ThemedText style={styles.actionText}>↗ Share</ThemedText>
+            </Pressable>
+            <Pressable
+              onPress={() => {
+                Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
+                router.push(`/note/${selectedNote.id}`);
+                setSelectedNote(null);
+              }}
+              style={styles.actionButton}>
+              <ThemedText style={styles.actionText}>✎ Edit</ThemedText>
+            </Pressable>
+            <Pressable onPress={() => deleteNote(selectedNote)} style={[styles.actionButton, styles.deleteButton]}>
+              <ThemedText style={styles.actionText}>🗑 Delete</ThemedText>
+            </Pressable>
+          </View>
+        )}
       </SafeAreaView>
 
       <Modal visible={isComposerOpen} animationType="slide" transparent onRequestClose={() => setIsComposerOpen(false)}>
-        <KeyboardAvoidingView style={styles.modalBackdrop} behavior={Platform.OS === 'ios' ? 'padding' : undefined}><View style={styles.composer}><View style={styles.composerHeader}><ThemedText style={styles.composerTitle}>New note</ThemedText><Pressable onPress={() => setIsComposerOpen(false)}><ThemedText style={styles.closeButton}>×</ThemedText></Pressable></View><TextInput value={title} onChangeText={setTitle} placeholder="Title" placeholderTextColor="#A8A4B5" style={styles.titleInput} /><TextInput value={content} onChangeText={setContent} placeholder="Write your thought…" placeholderTextColor="#A8A4B5" style={styles.contentInput} multiline textAlignVertical="top" /><Pressable onPress={createNote} style={styles.saveButton}><ThemedText style={styles.saveButtonText}>Save note</ThemedText></Pressable></View></KeyboardAvoidingView>
+        <KeyboardAvoidingView
+          style={styles.modalBackdrop}
+          behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
+          <View style={styles.composer}>
+            <View style={styles.composerHeader}>
+              <ThemedText style={styles.composerTitle}>New text note</ThemedText>
+              <Pressable onPress={() => setIsComposerOpen(false)}>
+                <ThemedText style={styles.closeButton}>×</ThemedText>
+              </Pressable>
+            </View>
+            <TextInput
+              value={title}
+              onChangeText={setTitle}
+              placeholder="Title"
+              placeholderTextColor="#A8A4B5"
+              style={styles.titleInput}
+            />
+            <TextInput
+              value={content}
+              onChangeText={setContent}
+              placeholder="Write your thought…"
+              placeholderTextColor="#A8A4B5"
+              style={styles.contentInput}
+              multiline
+              textAlignVertical="top"
+            />
+            <Pressable onPress={createNote} style={styles.saveButton}>
+              <ThemedText style={styles.saveButtonText}>Save note</ThemedText>
+            </Pressable>
+          </View>
+        </KeyboardAvoidingView>
       </Modal>
     </ThemedView>
   );
@@ -215,60 +449,66 @@ const styles = StyleSheet.create({
   safeArea: { flex: 1 },
   content: { width: '100%', maxWidth: 760, alignSelf: 'center', paddingHorizontal: 24, paddingTop: 18 },
   headerRow: { flexDirection: 'row', alignItems: 'center', marginBottom: 24 },
-  avatar: { width: 54, height: 54, borderRadius: 27, borderWidth: 2, borderColor: '#B5C2D8', alignItems: 'center', justifyContent: 'center', backgroundColor: '#EAF0F8' },
+  avatar: { width: 50, height: 50, borderRadius: 25, borderWidth: 2, borderColor: '#B5C2D8', alignItems: 'center', justifyContent: 'center', backgroundColor: '#EAF0F8' },
   avatarText: { color: ACCENT, fontSize: 18, fontWeight: '800' },
   greetingBlock: { marginLeft: 14 },
-  greetingSmall: { color: '#9AA4B2', fontSize: 14 },
-  greetingName: { color: INK, fontSize: 19, fontWeight: '800', marginTop: 2 },
+  greetingSmall: { color: '#9AA4B2', fontSize: 13 },
+  greetingName: { color: INK, fontSize: 18, fontWeight: '800', marginTop: 1 },
   headerSpacer: { flex: 1 },
-  noteCount: { backgroundColor: '#DCE7FA', borderRadius: 20, paddingHorizontal: 13, paddingVertical: 10 },
+  noteCount: { backgroundColor: '#DCE7FA', borderRadius: 20, paddingHorizontal: 12, paddingVertical: 8 },
   noteCountText: { color: ACCENT, fontWeight: '800', fontSize: 13 },
-  bell: { width: 44, height: 44, borderRadius: 22, backgroundColor: '#FFFFFF', marginLeft: 10, alignItems: 'center', justifyContent: 'center' },
-  bellText: { color: INK, fontSize: 22 },
-  searchBox: { height: 62, backgroundColor: '#FFFFFF', borderRadius: 22, flexDirection: 'row', alignItems: 'center', paddingHorizontal: 18, borderWidth: 1, borderColor: BORDER },
-  searchIcon: { color: '#8793A4', fontSize: 27, marginRight: 10 },
-  searchInput: { flex: 1, color: INK, fontSize: 17 },
-  chips: { gap: 10, paddingVertical: 20 },
-  chip: { backgroundColor: '#FFFFFF', borderWidth: 1, borderColor: BORDER, borderRadius: 22, paddingHorizontal: 19, paddingVertical: 11 },
+  bell: { width: 44, height: 44, borderRadius: 22, backgroundColor: '#FFFFFF', marginLeft: 8, alignItems: 'center', justifyContent: 'center' },
+  bellText: { color: INK, fontSize: 18 },
+  searchBox: { height: 58, backgroundColor: '#FFFFFF', borderRadius: 20, flexDirection: 'row', alignItems: 'center', paddingHorizontal: 18, borderWidth: 1, borderColor: BORDER },
+  searchIcon: { color: '#8793A4', fontSize: 24, marginRight: 10 },
+  searchInput: { flex: 1, color: INK, fontSize: 16 },
+  chips: { gap: 10, paddingVertical: 18 },
+  chip: { backgroundColor: '#FFFFFF', borderWidth: 1, borderColor: BORDER, borderRadius: 22, paddingHorizontal: 18, paddingVertical: 10 },
   chipSelected: { backgroundColor: ACCENT, borderColor: ACCENT },
-  chipText: { color: '#5F6978', fontSize: 15 },
+  chipText: { color: '#5F6978', fontSize: 14, fontWeight: '600' },
   chipTextSelected: { color: '#FFFFFF', fontWeight: '800' },
   loading: { color: MUTED, paddingVertical: 20 },
   sectionHeader: { flexDirection: 'row', alignItems: 'center', marginTop: 10, marginBottom: 14, gap: 8 },
-  sectionTitle: { color: INK, fontSize: 19, fontWeight: '800' },
-  countBadge: { color: ACCENT, backgroundColor: '#DCE7FA', borderRadius: 14, paddingHorizontal: 9, paddingVertical: 3, fontSize: 13, fontWeight: '800' },
-  noteCard: { backgroundColor: '#FFFFFF', borderRadius: 22, borderWidth: 1, borderColor: BORDER, padding: 20, marginBottom: 14 },
+  sectionTitle: { color: INK, fontSize: 18, fontWeight: '800' },
+  countBadge: { color: ACCENT, backgroundColor: '#DCE7FA', borderRadius: 14, paddingHorizontal: 9, paddingVertical: 3, fontSize: 12, fontWeight: '800' },
+  noteCard: { backgroundColor: '#FFFFFF', borderRadius: 20, borderWidth: 1, borderColor: BORDER, padding: 18, marginBottom: 14 },
   noteTopRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
-  categoryPill: { borderRadius: 16, paddingHorizontal: 13, paddingVertical: 7, fontSize: 13, fontWeight: '800' },
+  categoryPill: { flexDirection: 'row', alignItems: 'center', borderRadius: 14, borderWidth: 1, paddingHorizontal: 10, paddingVertical: 5, gap: 5 },
+  categoryIcon: { fontSize: 12 },
+  categoryPillText: { fontSize: 12, fontWeight: '800' },
   noteMetaTop: { flexDirection: 'row', alignItems: 'center', gap: 7 },
-  statusDot: { width: 10, height: 10, borderRadius: 5 },
-  duration: { color: '#7D8795', fontSize: 13 },
-  noteTitle: { color: INK, fontSize: 18, fontWeight: '800', marginTop: 16 },
-  notePreview: { color: '#647080', fontSize: 15, lineHeight: 23, marginTop: 10 },
-  noteBottomRow: { flexDirection: 'row', alignItems: 'center', gap: 18, marginTop: 18 },
-  noteMetadata: { color: '#9AA4B2', fontSize: 13 },
-  star: { marginLeft: 'auto', color: '#F28B22', fontSize: 18 },
-  deleteButton: { marginLeft: 'auto', borderWidth: 1, borderColor: '#F0C4CC', borderRadius: 10, paddingHorizontal: 9, paddingVertical: 5 },
-  deleteText: { color: '#C63E57', fontSize: 12, fontWeight: '800' },
-  emptyState: { backgroundColor: '#FFFFFF', borderRadius: 22, padding: 28, alignItems: 'center' },
-  emptyTitle: { color: INK, fontSize: 18, fontWeight: '800' },
-  emptySubtitle: { color: MUTED, marginTop: 8 },
-  fab: { position: 'absolute', alignSelf: 'center', bottom: 58, width: 70, height: 70, borderRadius: 35, backgroundColor: ORANGE, alignItems: 'center', justifyContent: 'center', shadowColor: ORANGE, shadowOpacity: 0.35, shadowRadius: 18, shadowOffset: { width: 0, height: 8 }, elevation: 10 },
+  statusDot: { width: 8, height: 8, borderRadius: 4 },
+  durationBadge: { backgroundColor: '#F3F4F6', borderRadius: 10, paddingHorizontal: 8, paddingVertical: 3 },
+  durationText: { color: '#4B5563', fontSize: 12, fontWeight: '700' },
+  noteTitle: { color: INK, fontSize: 17, fontWeight: '800', marginTop: 14 },
+  notePreview: { color: '#647080', fontSize: 14, lineHeight: 21, marginTop: 8 },
+  noteBottomRow: { flexDirection: 'row', alignItems: 'center', gap: 14, marginTop: 16 },
+  noteMetadata: { color: '#9AA4B2', fontSize: 12 },
+  aiPill: { color: '#7C3AED', backgroundColor: '#EDE9FE', borderRadius: 8, paddingHorizontal: 8, paddingVertical: 2, fontSize: 11, fontWeight: '800' },
+  star: { marginLeft: 'auto', color: '#F28B22', fontSize: 16 },
+  emptyState: { backgroundColor: '#FFFFFF', borderRadius: 24, borderWidth: 1, borderColor: BORDER, padding: 32, alignItems: 'center', marginTop: 14 },
+  emptyIcon: { fontSize: 44, marginBottom: 14 },
+  emptyTitle: { color: INK, fontSize: 19, fontWeight: '800', textAlign: 'center' },
+  emptySubtitle: { color: MUTED, marginTop: 8, fontSize: 14, lineHeight: 22, textAlign: 'center', maxWidth: 360 },
+  emptyCta: { backgroundColor: ACCENT, borderRadius: 16, paddingHorizontal: 22, paddingVertical: 14, marginTop: 22 },
+  emptyCtaText: { color: '#FFFFFF', fontSize: 15, fontWeight: '800' },
+  fab: { position: 'absolute', alignSelf: 'center', bottom: 48, width: 68, height: 68, borderRadius: 34, backgroundColor: ORANGE, alignItems: 'center', justifyContent: 'center', shadowColor: ORANGE, shadowOpacity: 0.35, shadowRadius: 18, shadowOffset: { width: 0, height: 8 }, elevation: 10 },
   fabPressed: { transform: [{ scale: 0.94 }], opacity: 0.9 },
-  fabText: { color: '#FFFFFF', fontSize: 34 },
-  actionTray: { position: 'absolute', left: 16, right: 16, bottom: 12, backgroundColor: '#FFFFFF', borderRadius: 30, padding: 10, flexDirection: 'row', alignItems: 'center', shadowColor: '#213047', shadowOpacity: 0.2, shadowRadius: 14, shadowOffset: { width: 0, height: 4 }, elevation: 8 },
-  thumbnail: { width: 54, height: 54, borderRadius: 16, backgroundColor: '#EFF3F8', alignItems: 'center', justifyContent: 'center', marginRight: 8 },
-  thumbnailText: { color: ACCENT, fontSize: 22 },
-  actionButton: { backgroundColor: '#4C6074', borderRadius: 24, paddingHorizontal: 20, paddingVertical: 14, marginLeft: 8 },
-  actionText: { color: '#FFFFFF', fontSize: 15, fontWeight: '800' },
+  fabText: { fontSize: 28 },
+  actionTray: { position: 'absolute', left: 16, right: 16, bottom: 12, backgroundColor: '#FFFFFF', borderRadius: 26, padding: 10, flexDirection: 'row', alignItems: 'center', shadowColor: '#213047', shadowOpacity: 0.2, shadowRadius: 14, shadowOffset: { width: 0, height: 4 }, elevation: 8 },
+  thumbnail: { width: 44, height: 44, borderRadius: 14, backgroundColor: '#EFF3F8', alignItems: 'center', justifyContent: 'center', marginRight: 4 },
+  thumbnailText: { color: ACCENT, fontSize: 18 },
+  actionButton: { backgroundColor: '#4C6074', borderRadius: 20, paddingHorizontal: 16, paddingVertical: 12, marginLeft: 6 },
+  deleteButton: { backgroundColor: DANGER },
+  actionText: { color: '#FFFFFF', fontSize: 14, fontWeight: '800' },
   pressed: { opacity: 0.72 },
   modalBackdrop: { flex: 1, justifyContent: 'flex-end', backgroundColor: 'rgba(23,21,42,0.32)' },
-  composer: { backgroundColor: '#FFFFFF', borderTopLeftRadius: 28, borderTopRightRadius: 28, padding: 24, minHeight: 420 },
-  composerHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 22 },
-  composerTitle: { color: INK, fontSize: 24, fontWeight: '800' },
-  closeButton: { color: MUTED, fontSize: 32, lineHeight: 32 },
-  titleInput: { color: INK, fontSize: 20, fontWeight: '700', borderBottomWidth: 1, borderBottomColor: BORDER, paddingVertical: 12 },
-  contentInput: { color: INK, fontSize: 16, lineHeight: 24, minHeight: 150, paddingTop: 18 },
-  saveButton: { backgroundColor: ACCENT, borderRadius: 16, alignItems: 'center', paddingVertical: 16, marginTop: 18 },
-  saveButtonText: { color: '#FFFFFF', fontSize: 16, fontWeight: '800' },
+  composer: { backgroundColor: '#FFFFFF', borderTopLeftRadius: 28, borderTopRightRadius: 28, padding: 24, minHeight: 400 },
+  composerHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 20 },
+  composerTitle: { color: INK, fontSize: 22, fontWeight: '800' },
+  closeButton: { color: MUTED, fontSize: 30, lineHeight: 30 },
+  titleInput: { color: INK, fontSize: 18, fontWeight: '700', borderBottomWidth: 1, borderBottomColor: BORDER, paddingVertical: 10 },
+  contentInput: { color: INK, fontSize: 15, lineHeight: 22, minHeight: 140, paddingTop: 16 },
+  saveButton: { backgroundColor: ACCENT, borderRadius: 14, alignItems: 'center', paddingVertical: 15, marginTop: 18 },
+  saveButtonText: { color: '#FFFFFF', fontSize: 15, fontWeight: '800' },
 });

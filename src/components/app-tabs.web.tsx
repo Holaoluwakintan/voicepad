@@ -6,17 +6,15 @@ import {
   TabTriggerSlotProps,
   TabListProps,
 } from 'expo-router/ui';
-import { Pressable, View, StyleSheet } from 'react-native';
+import { Pressable, useColorScheme, View, StyleSheet } from 'react-native';
 
 import { ThemedText } from './themed-text';
 import { ThemedView } from './themed-view';
-
-import { MaxContentWidth, Spacing } from '@/constants/theme';
+import { Colors, MaxContentWidth, Spacing } from '@/constants/theme';
 
 export default function AppTabs() {
   return (
-    <Tabs>
-      <TabSlot style={{ height: '100%' }} />
+    <Tabs style={styles.tabsRoot}>
       <TabList asChild>
         <CustomTabList>
           <TabTrigger name="index" href="/" asChild>
@@ -30,6 +28,7 @@ export default function AppTabs() {
           </TabTrigger>
         </CustomTabList>
       </TabList>
+      <TabSlot style={styles.tabSlot} />
     </Tabs>
   );
 }
@@ -40,7 +39,7 @@ export function TabButton({ children, isFocused, ...props }: TabTriggerSlotProps
       <ThemedView
         type={isFocused ? 'backgroundSelected' : 'backgroundElement'}
         style={styles.tabButtonView}>
-        <ThemedText type="small" themeColor={isFocused ? 'text' : 'textSecondary'}>
+        <ThemedText type="smallBold" themeColor={isFocused ? 'text' : 'textSecondary'}>
           {children}
         </ThemedText>
       </ThemedView>
@@ -49,48 +48,74 @@ export function TabButton({ children, isFocused, ...props }: TabTriggerSlotProps
 }
 
 export function CustomTabList(props: TabListProps) {
+  const scheme = useColorScheme();
+  const isDark = scheme === 'dark';
+  const colors = isDark ? Colors.dark : Colors.light;
+
   return (
-    <View {...props} style={styles.tabListContainer}>
-      <ThemedView type="backgroundElement" style={styles.innerContainer}>
-        <ThemedText type="smallBold" style={styles.brandText}>
-          VoicePad
-        </ThemedText>
+    <View {...props} style={[styles.tabListContainer, { backgroundColor: colors.background, borderBottomColor: colors.backgroundElement }]}>
+      <View style={styles.innerContainer}>
+        <View style={styles.brandRow}>
+          <ThemedText type="smallBold" style={styles.brandText}>
+            🎙️ VoicePad
+          </ThemedText>
+        </View>
 
-        {props.children}
-
-      </ThemedView>
+        <View style={styles.tabButtonsRow}>
+          {props.children}
+        </View>
+      </View>
     </View>
   );
 }
 
 const styles = StyleSheet.create({
+  tabsRoot: {
+    flex: 1,
+    height: '100%',
+  },
   tabListContainer: {
-    position: 'absolute',
     width: '100%',
-    padding: Spacing.three,
+    paddingVertical: Spacing.two,
+    paddingHorizontal: Spacing.four,
     justifyContent: 'center',
     alignItems: 'center',
     flexDirection: 'row',
+    borderBottomWidth: 1,
+    zIndex: 100,
   },
   innerContainer: {
-    paddingVertical: Spacing.two,
-    paddingHorizontal: Spacing.five,
-    borderRadius: Spacing.five,
+    paddingVertical: Spacing.one,
     flexDirection: 'row',
     alignItems: 'center',
-    flexGrow: 1,
-    gap: Spacing.two,
+    justifyContent: 'space-between',
+    width: '100%',
     maxWidth: MaxContentWidth,
   },
+  brandRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
   brandText: {
-    marginRight: 'auto',
+    fontSize: 16,
+    fontWeight: '800',
+    letterSpacing: 0.5,
+  },
+  tabButtonsRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.two,
   },
   pressed: {
-    opacity: 0.7,
+    opacity: 0.75,
   },
   tabButtonView: {
-    paddingVertical: Spacing.one,
-    paddingHorizontal: Spacing.three,
+    paddingVertical: Spacing.two,
+    paddingHorizontal: Spacing.four,
     borderRadius: Spacing.three,
+  },
+  tabSlot: {
+    flex: 1,
+    height: '100%',
   },
 });
