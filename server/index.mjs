@@ -57,49 +57,52 @@ app.post('/transcribe', rateLimitMiddleware, upload.single('file'), async (req, 
     /\.(m4a|mp4|webm|ogg|wav|mp3|aac)$/i.test(req.file.originalname || '');
   if (!isAudio) return res.status(400).json({ error: 'Unsupported audio format.' });
 
-  const mode = req.body?.mode === 'original' ? 'original' : 'english';
-  const endpoint = mode === 'english' ? 'translations' : 'transcriptions';
-  const model = mode === 'english'
-    ? process.env.GROQ_TRANSLATION_MODEL || 'whisper-large-v3'
-    : process.env.GROQ_TRANSCRIPTION_MODEL || 'whisper-large-v3-turbo';
+  // Default to whisper-large-v3-turbo on transcriptions for blazing-fast transcription speed
+  const models = [
+    process.env.GROQ_TRANSCRIPTION_MODEL,
+    'whisper-large-v3-turbo',
+    'whisper-large-v3',
+  ].filter(Boolean);
 
-  console.log(`transcription_request mode=${mode} file=${req.file.originalname || 'unknown'} bytes=${req.file.size} model=${model}`);
+  console.log(`transcription_request file=${req.file.originalname || 'unknown'} bytes=${req.file.size}`);
 
-  try {
-    const form = new FormData();
-    form.append('file', new Blob([req.file.buffer], { type: req.file.mimetype || 'audio/mp4' }), req.file.originalname || 'voice-note.m4a');
-    form.append('model', model);
-    form.append('response_format', 'json');
-    form.append('temperature', '0');
-
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 45_000);
-    let response;
+  for (const model of models) {
     try {
-      response = await fetch(`${groqBaseUrl}/audio/${endpoint}`, {
-        method: 'POST',
-        headers: { Authorization: `Bearer ${process.env.GROQ_API_KEY}` },
-        body: form,
-        signal: controller.signal,
-      });
-    } finally {
-      clearTimeout(timeout);
-    }
+      const form = new FormData();
+      form.append('file', new Blob([req.file.buffer], { type: req.file.mimetype || 'audio/mp4' }), req.file.originalname || 'voice-note.m4a');
+      form.append('model', model);
+      form.append('response_format', 'json');
+      form.append('temperature', '0');
 
-    const payload = await response.json().catch(() => null);
-    if (!response.ok) {
-      console.error('groq_transcription_failed', response.status, payload?.error?.message || 'provider error');
-      return res.status(502).json({ error: payload?.error?.message || 'Groq transcription failed. The audio is still saved locally.' });
-    }
-    if (!payload?.text || typeof payload.text !== 'string') return res.status(502).json({ error: 'Groq returned no transcript.' });
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), 60_000);
+      let response;
+      try {
+        response = await fetch(`${groqBaseUrl}/audio/transcriptions`, {
+          method: 'POST',
+          headers: { Authorization: `Bearer ${process.env.GROQ_API_KEY}` },
+          body: form,
+          signal: controller.signal,
+        });
+      } finally {
+        clearTimeout(timeout);
+      }
 
-    console.log(`groq_transcription_succeeded mode=${mode}`);
-    return res.json({ text: payload.text, mode, model });
-  } catch (error) {
-    const message = error instanceof Error && error.name === 'AbortError' ? 'Groq transcription timed out. Please retry.' : 'Transcription provider is temporarily unavailable. Please retry.';
-    console.error('transcription_failed', error instanceof Error ? error.message : error);
-    return res.status(502).json({ error: message });
+      const payload = await response.json().catch(() => null);
+      if (!response.ok) {
+        console.warn(`transcription_model_failed model=${model} status=${response.status}`, payload?.error?.message);
+        continue; // Try next model candidate
+      }
+      if (payload?.text && typeof payload.text === 'string') {
+        console.log(`groq_transcription_succeeded model=${model}`);
+        return res.json({ text: payload.text.trim(), model });
+      }
+    } catch (err) {
+      console.warn(`transcription_attempt_failed model=${model}`, err instanceof Error ? err.message : err);
+    }
   }
+
+  return res.status(502).json({ error: 'Transcription provider could not process the audio. Please retry.' });
 });
 
 app.post('/summarize', rateLimitMiddleware, async (req, res) => {
@@ -110,62 +113,165 @@ app.post('/summarize', rateLimitMiddleware, async (req, res) => {
     return res.status(400).json({ error: 'Transcript text is required.' });
   }
 
-  const model = process.env.GROQ_SUMMARY_MODEL || 'llama-3.3-70b-versatile';
-  console.log(`summary_request chars=${text.length} model=${model}`);
+  // Use llama-3.1-8b-instant as primary (available to all Groq tiers, sub-second latency) with fallbacks
+  const modelsToTry = [
+    process.env.GROQ_SUMMARY_MODEL,
+    'llama-3.1-8b-instant',
+    'llama-3.3-70b-versatile',
+    'llama3-8b-8192',
+    'mixtral-8x7b-32768',
+  ].filter(Boolean);
 
-  try {
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 45_000);
-    let response;
+  console.log(`summary_request chars=${text.length}`);
+
+  for (const model of modelsToTry) {
     try {
-      response = await fetch(`${groqBaseUrl}/chat/completions`, {
-        method: 'POST',
-        headers: {
-          Authorization: `Bearer ${process.env.GROQ_API_KEY}`,
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          model,
-          messages: [
-            {
-              role: 'system',
-              content:
-                'You are VoicePad AI, an expert executive assistant and note-taker. Provide a crisp, structured breakdown of the user transcript. Follow this exact format:\n\n' +
-                '### 📌 Executive Summary\n2-3 concise sentences summarizing the core message.\n\n' +
-                '### 🔑 Key Takeaways\n- Bullet points of the primary ideas and insights discussed.\n\n' +
-                '### ⚡ Action Items & Next Steps\n- [ ] Concrete tasks, decisions, or follow-ups mentioned (or "None mentioned" if none).',
-            },
-            {
-              role: 'user',
-              content: text.slice(0, 32000),
-            },
-          ],
-          temperature: 0.2,
-        }),
-        signal: controller.signal,
-      });
-    } finally {
-      clearTimeout(timeout);
-    }
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), 45_000);
+      let response;
+      try {
+        response = await fetch(`${groqBaseUrl}/chat/completions`, {
+          method: 'POST',
+          headers: {
+            Authorization: `Bearer ${process.env.GROQ_API_KEY}`,
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            model,
+            messages: [
+              {
+                role: 'system',
+                content:
+                  'You are VoicePad AI, an expert executive assistant and note-taker. Provide a crisp, structured breakdown of the user transcript. Follow this exact format:\n\n' +
+                  '### 📌 Executive Summary\n2-3 concise sentences summarizing the core message.\n\n' +
+                  '### 🔑 Key Takeaways\n- Bullet points of the primary ideas and insights discussed.\n\n' +
+                  '### ⚡ Action Items & Next Steps\n- [ ] Concrete tasks, decisions, or follow-ups mentioned (or "None mentioned" if none).',
+              },
+              {
+                role: 'user',
+                content: text.slice(0, 32000),
+              },
+            ],
+            temperature: 0.2,
+          }),
+          signal: controller.signal,
+        });
+      } finally {
+        clearTimeout(timeout);
+      }
 
-    const payload = await response.json().catch(() => null);
-    if (!response.ok) {
-      console.error('groq_summary_failed', response.status, payload?.error?.message || 'provider error');
-      return res.status(502).json({ error: payload?.error?.message || 'AI Summary failed. Please retry.' });
-    }
+      const payload = await response.json().catch(() => null);
+      if (!response.ok) {
+        console.warn(`summary_model_failed model=${model} status=${response.status}`, payload?.error?.message);
+        continue; // Try next candidate model
+      }
 
-    const content = payload?.choices?.[0]?.message?.content;
-    if (!content || typeof content !== 'string') {
-      return res.status(502).json({ error: 'Groq returned no summary.' });
+      const content = payload?.choices?.[0]?.message?.content;
+      if (content && typeof content === 'string') {
+        console.log(`groq_summary_succeeded model=${model}`);
+        return res.json({ summary: content.trim(), model });
+      }
+    } catch (err) {
+      console.warn(`summary_attempt_failed model=${model}`, err instanceof Error ? err.message : err);
     }
-
-    console.log('groq_summary_succeeded');
-    return res.json({ summary: content.trim(), model });
-  } catch (error) {
-    const message = error instanceof Error && error.name === 'AbortError' ? 'AI Summary timed out. Please retry.' : 'AI service is temporarily unavailable. Please retry.';
-    console.error('summary_failed', error instanceof Error ? error.message : error);
-    return res.status(502).json({ error: message });
   }
+
+  return res.status(502).json({ error: 'AI summary could not be generated. Please retry.' });
+});
+
+// Image-to-Text OCR Vision Endpoint (Llama 3.2 Vision)
+app.post('/ocr', rateLimitMiddleware, upload.single('image'), async (req, res) => {
+  if (!process.env.GROQ_API_KEY) return res.status(500).json({ error: 'GROQ_API_KEY is not configured on the server.' });
+
+  let base64Data = '';
+  let mimeType = 'image/jpeg';
+
+  if (req.file) {
+    base64Data = req.file.buffer.toString('base64');
+    mimeType = req.file.mimetype || 'image/jpeg';
+  } else if (req.body?.image) {
+    const raw = req.body.image;
+    if (raw.startsWith('data:')) {
+      const match = raw.match(/^data:([^;]+);base64,(.+)$/);
+      if (match) {
+        mimeType = match[1];
+        base64Data = match[2];
+      } else {
+        base64Data = raw;
+      }
+    } else {
+      base64Data = raw;
+    }
+  } else {
+    return res.status(400).json({ error: 'An image file or base64 data is required.' });
+  }
+
+  const visionModels = [
+    process.env.GROQ_VISION_MODEL,
+    'llama-3.2-11b-vision-preview',
+    'llama-3.2-90b-vision-preview',
+  ].filter(Boolean);
+
+  for (const model of visionModels) {
+    try {
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), 45_000);
+      let response;
+      try {
+        response = await fetch(`${groqBaseUrl}/chat/completions`, {
+          method: 'POST',
+          headers: {
+            Authorization: `Bearer ${process.env.GROQ_API_KEY}`,
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            model,
+            messages: [
+              {
+                role: 'user',
+                content: [
+                  {
+                    type: 'text',
+                    text: 'Extract and transcribe all text from this image accurately (whiteboard, document, handwritten notes, lecture slides, or textbook). Format cleanly with headings and bullet points where helpful. Output ONLY the transcribed content without any extra intro or conversational commentary.',
+                  },
+                  {
+                    type: 'image_url',
+                    image_url: {
+                      url: `data:${mimeType};base64,${base64Data}`,
+                    },
+                  },
+                ],
+              },
+            ],
+            temperature: 0.1,
+          }),
+          signal: controller.signal,
+        });
+      } finally {
+        clearTimeout(timeout);
+      }
+
+      const payload = await response.json().catch(() => null);
+      if (!response.ok) {
+        console.warn(`vision_model_failed model=${model} status=${response.status}`, payload?.error?.message);
+        continue;
+      }
+
+      const text = payload?.choices?.[0]?.message?.content;
+      if (text && typeof text === 'string') {
+        const firstLine = text.split('\n')[0].replace(/^[#*\s-]+/, '').trim().slice(0, 50);
+        return res.json({
+          text: text.trim(),
+          title: firstLine || 'Photo Note',
+          model,
+        });
+      }
+    } catch (err) {
+      console.warn(`vision_attempt_failed model=${model}`, err instanceof Error ? err.message : err);
+    }
+  }
+
+  return res.status(502).json({ error: 'Could not transcribe image. Please ensure the image is clear and retry.' });
 });
 
 app.use((error, _req, res, _next) => {

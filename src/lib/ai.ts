@@ -56,3 +56,57 @@ export async function generateAISummary(transcript: string): Promise<SummaryResu
     clearTimeout(timeout);
   }
 }
+
+export type OCRResult = {
+  text: string;
+  title: string;
+  model?: string;
+};
+
+/**
+ * Sends a captured or picked image to the backend OCR vision endpoint
+ * to extract and transcribe text via Groq Llama 3.2 Vision.
+ */
+export async function transcribeImage(base64Image: string, mimeType = 'image/jpeg'): Promise<OCRResult> {
+  const clean = base64Image?.trim();
+  if (!clean) throw new Error('Image data is empty.');
+
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 60_000);
+
+  try {
+    const response = await fetch(`${TRANSCRIPTION_API_URL}/ocr`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        image: clean.startsWith('data:') ? clean : `data:${mimeType};base64,${clean}`,
+      }),
+      signal: controller.signal,
+    });
+
+    const payload = await response.json().catch(() => null);
+    if (!response.ok) {
+      throw new Error(payload?.error || `Image transcription failed (${response.status})`);
+    }
+
+    if (!payload?.text || typeof payload.text !== 'string') {
+      throw new Error('No text could be extracted from the image.');
+    }
+
+    return {
+      text: payload.text.trim(),
+      title: payload.title || 'Photo Note',
+      model: payload.model,
+    };
+  } catch (error) {
+    if (error instanceof Error && error.name === 'AbortError') {
+      throw new Error('Image transcription timed out. Please retry.');
+    }
+    throw error;
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+

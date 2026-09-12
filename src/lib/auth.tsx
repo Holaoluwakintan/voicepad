@@ -1,11 +1,9 @@
 import { Session, User } from '@supabase/supabase-js';
 import { PropsWithChildren, createContext, useContext, useEffect, useMemo, useState } from 'react';
 import { Platform } from 'react-native';
-import * as WebBrowser from 'expo-web-browser';
 import * as Linking from 'expo-linking';
 import { isSupabaseConfigured, supabase } from './supabase';
 
-WebBrowser.maybeCompleteAuthSession();
 
 type AuthContextValue = {
   user: User | null;
@@ -71,54 +69,13 @@ export function AuthProvider({ children }: PropsWithChildren) {
         };
       },
       signInWithOAuth: async (provider: 'google' | 'apple') => {
-        if (!supabase) return { error: 'Cloud accounts are not configured yet.' };
-
-        try {
-          if (Platform.OS === 'web') {
-            const { error } = await supabase.auth.signInWithOAuth({
-              provider,
-              options: {
-                redirectTo: typeof window !== 'undefined' ? window.location.origin : undefined,
-              },
-            });
-            return { error: error?.message ?? null };
-          }
-
-          // Mobile OAuth flow with in-app browser
-          const redirectUrl = Linking.createURL('auth/callback');
-          const { data, error } = await supabase.auth.signInWithOAuth({
-            provider,
-            options: {
-              redirectTo: redirectUrl,
-              skipBrowserRedirect: true,
-            },
-          });
-
-          if (error) return { error: error.message };
-          if (!data?.url) return { error: 'Could not generate authentication URL.' };
-
-          const authResult = await WebBrowser.openAuthSessionAsync(data.url, redirectUrl);
-
-          if (authResult.type === 'success' && authResult.url) {
-            // Extract tokens if passed in callback URL
-            const urlObj = new URL(authResult.url);
-            const params = new URLSearchParams(urlObj.hash.replace(/^#/, ''));
-            const accessToken = params.get('access_token');
-            const refreshToken = params.get('refresh_token');
-
-            if (accessToken && refreshToken) {
-              const { error: sessionError } = await supabase.auth.setSession({
-                access_token: accessToken,
-                refresh_token: refreshToken,
-              });
-              if (sessionError) return { error: sessionError.message };
-            }
-          }
-
-          return { error: null };
-        } catch (err) {
-          return { error: err instanceof Error ? err.message : 'OAuth sign in failed.' };
-        }
+        // Google and Apple OAuth are currently disabled in this Supabase project.
+        // Only Email/Password sign-in is enabled. Return a friendly message instead
+        // of letting Supabase open a browser page with a raw JSON 400 error.
+        return {
+          error:
+            `${provider === 'google' ? 'Google' : 'Apple'} sign-in is not yet available.\n\nPlease use your email and password to sign in or create an account.`,
+        };
       },
       resetPassword: async (email: string) => {
         if (!supabase) return { error: 'Cloud accounts are not configured yet.' };

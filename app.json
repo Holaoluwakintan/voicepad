@@ -13,8 +13,9 @@
       "supportsTablet": true,
       "infoPlist": {
         "NSMicrophoneUsageDescription": "VoicePad needs microphone access to record voice notes, sermons, lectures, and meetings for AI transcription.",
+        "NSCameraUsageDescription": "VoicePad needs camera access to scan documents, whiteboards, and notes for AI OCR transcription.",
+        "NSPhotoLibraryUsageDescription": "VoicePad needs photo library access to transcribe notes from uploaded images.",
         "UIBackgroundModes": [
-          "audio",
           "audio"
         ],
         "ITSAppUsesNonExemptEncryption": false
@@ -32,6 +33,7 @@
         "android.permission.INTERNET",
         "android.permission.ACCESS_NETWORK_STATE",
         "android.permission.RECORD_AUDIO",
+        "android.permission.CAMERA",
         "android.permission.MODIFY_AUDIO_SETTINGS",
         "android.permission.FOREGROUND_SERVICE",
         "android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK"
@@ -55,7 +57,14 @@
       ],
       "expo-audio",
       "expo-sqlite",
-      "expo-secure-store"
+      "expo-secure-store",
+      [
+        "expo-image-picker",
+        {
+          "photosPermission": "VoicePad needs photo library access to transcribe notes from pictures.",
+          "cameraPermission": "VoicePad needs camera access to scan notes and whiteboards."
+        }
+      ]
     ],
     "experiments": {
       "typedRoutes": true,

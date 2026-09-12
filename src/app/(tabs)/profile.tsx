@@ -335,10 +335,10 @@ export default function ProfileScreen() {
                 Your voice notes and audio recordings are securely synced to your private Supabase cloud workspace.
               </ThemedText>
               <View style={styles.accountActions}>
-                <Pressable disabled={busy} onPress={handleSync} style={[styles.primaryButton, styles.flexAction]}>
+                <Pressable disabled={busy} onPress={handleSync} style={styles.syncBtn}>
                   <Text style={styles.primaryText}>{busy ? 'Syncing…' : 'Sync now'}</Text>
                 </Pressable>
-                <Pressable disabled={busy} onPress={handleSignOut} style={[styles.secondaryButton, styles.flexAction, { backgroundColor: '#DC2626' }]}>
+                <Pressable disabled={busy} onPress={handleSignOut} style={styles.signOutBtn}>
                   <Text style={styles.secondaryText}>Sign out</Text>
                 </Pressable>
               </View>
@@ -519,7 +519,33 @@ const styles = StyleSheet.create({
   flexAction: { flex: 1, width: 'auto' as any, marginTop: 0 },
   deleteAccountButton: { marginTop: 16, alignItems: 'center', paddingVertical: 10 },
   deleteAccountText: { color: '#DC2626', fontSize: 13, fontWeight: '700' },
-  accountActions: { flexDirection: 'row', gap: 10 },
+  accountActions: { flexDirection: 'row', gap: 10, marginTop: 14 },
+  syncBtn: {
+    flex: 1,
+    backgroundColor: '#2563EB',
+    borderRadius: 14,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 14,
+    elevation: 2,
+    shadowColor: '#2563EB',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.2,
+    shadowRadius: 4,
+  },
+  signOutBtn: {
+    flex: 1,
+    backgroundColor: '#DC2626',
+    borderRadius: 14,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 14,
+    elevation: 2,
+    shadowColor: '#DC2626',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.2,
+    shadowRadius: 4,
+  },
   sectionTitle: { alignSelf: 'flex-start', color: '#182235', fontSize: 18, fontWeight: '800', marginTop: 26, marginBottom: 8 },
   syncMessage: { color: '#24835A', fontSize: 13, marginTop: 12, fontWeight: '700' },
   row: { width: '100%', maxWidth: 560, backgroundColor: '#FFFFFF', borderRadius: 16, padding: 18, marginBottom: 10, flexDirection: 'row', justifyContent: 'space-between', borderWidth: 1, borderColor: '#E1E7F0' },
