@@ -216,14 +216,8 @@ app.post('/ocr', rateLimitMiddleware, upload.single('image'), async (req, res) =
 
   const visionModels = [
     process.env.GROQ_VISION_MODEL,
-    'llama-3.2-11b-vision-preview',
-    'llama-3.2-90b-vision-preview',
-    'llama-3.2-11b-vision',
-    'llama-3.2-90b-vision',
-    'meta-llama/llama-3.2-11b-vision-instruct',
-    'meta-llama/llama-3.2-90b-vision-instruct',
-    'qwen/qwen-2.5-vl-72b-instruct',
-    'llava-v1.5-7b-4096-preview',
+    'qwen/qwen3.8-27b',
+    'qwen/qwen3.6-27b',
   ].filter(Boolean);
 
   let lastErrorMessage = '';
