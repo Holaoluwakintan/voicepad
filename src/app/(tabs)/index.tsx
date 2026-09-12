@@ -130,6 +130,7 @@ export default function HomeScreen() {
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [isComposerOpen, setIsComposerOpen] = useState(false);
   const [selectedCategory, setSelectedCategory] = useState<'All' | NoteCategory>('All');
+  const [filterSource, setFilterSource] = useState<'voice' | 'all'>('voice');
   const [search, setSearch] = useState('');
   const [selectedNote, setSelectedNote] = useState<Note | null>(null);
   const [title, setTitle] = useState('');
@@ -163,8 +164,15 @@ export default function HomeScreen() {
     fetchNotes();
   }, [fetchNotes]);
 
+  const voiceNotesCount = useMemo(
+    () => notes.filter((n) => n.source === 'voice' || Boolean(n.audioUri || n.audioPath)).length,
+    [notes]
+  );
+
   const filteredNotes = useMemo(() => {
     return notes.filter((note) => {
+      const isVoice = note.source === 'voice' || Boolean(note.audioUri || note.audioPath);
+      if (filterSource === 'voice' && !isVoice) return false;
       const matchesCategory =
         selectedCategory === 'All' || (note.category ?? 'Personal') === selectedCategory;
       const query = search.trim().toLowerCase();
@@ -173,7 +181,7 @@ export default function HomeScreen() {
         (!query || `${note.title} ${note.content} ${note.summary || ''}`.toLowerCase().includes(query))
       );
     });
-  }, [notes, search, selectedCategory]);
+  }, [filterSource, notes, search, selectedCategory]);
 
   const pinnedNotes = useMemo(() => filteredNotes.filter((note) => note.pinned), [filteredNotes]);
   const recentNotes = useMemo(() => filteredNotes.filter((note) => !note.pinned), [filteredNotes]);
@@ -299,11 +307,11 @@ export default function HomeScreen() {
                 <Pressable
                   onPress={() => {
                     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
-                    setIsComposerOpen(true);
+                    router.push('/notes');
                   }}
                   style={styles.bell}
-                  accessibilityLabel="New text note">
-                  <ThemedText style={styles.bellText}>✎</ThemedText>
+                  accessibilityLabel="Open Notepad">
+                  <ThemedText style={styles.bellText}>✏️</ThemedText>
                 </Pressable>
               </View>
 
@@ -316,6 +324,43 @@ export default function HomeScreen() {
                   placeholderTextColor="#9AA4B2"
                   style={styles.searchInput}
                 />
+              </View>
+
+              <View style={styles.sourceToggleRow}>
+                <Pressable
+                  onPress={() => {
+                    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
+                    setFilterSource('voice');
+                  }}
+                  style={[
+                    styles.sourceToggleBtn,
+                    filterSource === 'voice' && styles.sourceToggleActive,
+                  ]}>
+                  <ThemedText
+                    style={[
+                      styles.sourceToggleText,
+                      filterSource === 'voice' && styles.sourceToggleActiveText,
+                    ]}>
+                    🎙️ Voice Notes ({voiceNotesCount})
+                  </ThemedText>
+                </Pressable>
+                <Pressable
+                  onPress={() => {
+                    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
+                    setFilterSource('all');
+                  }}
+                  style={[
+                    styles.sourceToggleBtn,
+                    filterSource === 'all' && styles.sourceToggleActive,
+                  ]}>
+                  <ThemedText
+                    style={[
+                      styles.sourceToggleText,
+                      filterSource === 'all' && styles.sourceToggleActiveText,
+                    ]}>
+                    📋 All Notes ({notes.length})
+                  </ThemedText>
+                </Pressable>
               </View>
 
               <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.chips}>
@@ -462,6 +507,29 @@ const styles = StyleSheet.create({
   searchBox: { height: 58, backgroundColor: '#FFFFFF', borderRadius: 20, flexDirection: 'row', alignItems: 'center', paddingHorizontal: 18, borderWidth: 1, borderColor: BORDER },
   searchIcon: { color: '#8793A4', fontSize: 24, marginRight: 10 },
   searchInput: { flex: 1, color: INK, fontSize: 16 },
+  sourceToggleRow: {
+    flexDirection: 'row',
+    backgroundColor: '#E4EAF5',
+    borderRadius: 16,
+    padding: 4,
+    marginTop: 14,
+    gap: 4,
+  },
+  sourceToggleBtn: {
+    flex: 1,
+    paddingVertical: 9,
+    borderRadius: 12,
+    alignItems: 'center',
+  },
+  sourceToggleActive: {
+    backgroundColor: '#FFFFFF',
+    shadowColor: '#000',
+    shadowOpacity: 0.08,
+    shadowRadius: 6,
+    elevation: 2,
+  },
+  sourceToggleText: { color: MUTED, fontSize: 13, fontWeight: '700' },
+  sourceToggleActiveText: { color: INK, fontWeight: '800' },
   chips: { gap: 10, paddingVertical: 18 },
   chip: { backgroundColor: '#FFFFFF', borderWidth: 1, borderColor: BORDER, borderRadius: 22, paddingHorizontal: 18, paddingVertical: 10 },
   chipSelected: { backgroundColor: ACCENT, borderColor: ACCENT },

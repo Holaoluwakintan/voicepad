@@ -22,15 +22,23 @@ const requestsByIp = new Map();
 const rateWindowMs = 60_000;
 const maxRequestsPerWindow = Number(process.env.MAX_REQUESTS_PER_MINUTE ?? 10);
 
-app.use(cors({
-  origin: (origin, callback) => {
-    if (!origin || allowedOrigins.includes('*') || allowedOrigins.includes(origin)) return callback(null, true);
-    return callback(new Error('Origin is not allowed.'));
-  },
-}));
-app.use(express.json());
+app.use(express.json({ limit: '25mb' }));
+app.use(express.urlencoded({ extended: true, limit: '25mb' }));
 
 app.get('/health', (_req, res) => res.json({ ok: true, service: 'voicepad-transcription' }));
+
+app.get('/models', async (_req, res) => {
+  if (!process.env.GROQ_API_KEY) return res.status(500).json({ error: 'GROQ_API_KEY is not configured on the server.' });
+  try {
+    const resp = await fetch(`${groqBaseUrl}/models`, {
+      headers: { Authorization: `Bearer ${process.env.GROQ_API_KEY}` },
+    });
+    const data = await resp.json();
+    return res.json(data);
+  } catch (err) {
+    return res.status(500).json({ error: err instanceof Error ? err.message : 'Could not fetch models' });
+  }
+});
 
 function isRateLimited(ip) {
   const now = Date.now();
@@ -210,7 +218,15 @@ app.post('/ocr', rateLimitMiddleware, upload.single('image'), async (req, res) =
     process.env.GROQ_VISION_MODEL,
     'llama-3.2-11b-vision-preview',
     'llama-3.2-90b-vision-preview',
+    'llama-3.2-11b-vision',
+    'llama-3.2-90b-vision',
+    'meta-llama/llama-3.2-11b-vision-instruct',
+    'meta-llama/llama-3.2-90b-vision-instruct',
+    'qwen/qwen-2.5-vl-72b-instruct',
+    'llava-v1.5-7b-4096-preview',
   ].filter(Boolean);
+
+  let lastErrorMessage = '';
 
   for (const model of visionModels) {
     try {
@@ -253,7 +269,8 @@ app.post('/ocr', rateLimitMiddleware, upload.single('image'), async (req, res) =
 
       const payload = await response.json().catch(() => null);
       if (!response.ok) {
-        console.warn(`vision_model_failed model=${model} status=${response.status}`, payload?.error?.message);
+        lastErrorMessage = payload?.error?.message || `Groq returned status ${response.status} for model ${model}`;
+        console.warn(`vision_model_failed model=${model} status=${response.status}`, lastErrorMessage);
         continue;
       }
 
@@ -267,11 +284,14 @@ app.post('/ocr', rateLimitMiddleware, upload.single('image'), async (req, res) =
         });
       }
     } catch (err) {
-      console.warn(`vision_attempt_failed model=${model}`, err instanceof Error ? err.message : err);
+      lastErrorMessage = err instanceof Error ? err.message : String(err);
+      console.warn(`vision_attempt_failed model=${model}`, lastErrorMessage);
     }
   }
 
-  return res.status(502).json({ error: 'Could not transcribe image. Please ensure the image is clear and retry.' });
+  return res.status(502).json({
+    error: lastErrorMessage || 'Could not transcribe image. Please ensure the image is clear and retry.',
+  });
 });
 
 app.use((error, _req, res, _next) => {

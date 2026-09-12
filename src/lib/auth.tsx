@@ -12,6 +12,7 @@ type AuthContextValue = {
   configured: boolean;
   signIn: (email: string, password: string) => Promise<{ error: string | null }>;
   signUp: (email: string, password: string) => Promise<{ error: string | null; needsEmailConfirmation: boolean }>;
+  resendConfirmation: (email: string) => Promise<{ error: string | null }>;
   signInWithOAuth: (provider: 'google' | 'apple') => Promise<{ error: string | null }>;
   resetPassword: (email: string) => Promise<{ error: string | null }>;
   updateProfile: (fullName: string) => Promise<{ error: string | null }>;
@@ -62,11 +63,36 @@ export function AuthProvider({ children }: PropsWithChildren) {
       },
       signUp: async (email, password) => {
         if (!supabase) return { error: 'Cloud accounts are not configured yet.', needsEmailConfirmation: false };
-        const { data, error } = await supabase.auth.signUp({ email: email.trim(), password });
+        const cleanEmail = email.trim();
+        const { data, error } = await supabase.auth.signUp({ email: cleanEmail, password });
+        if (error) {
+          return { error: error.message, needsEmailConfirmation: false };
+        }
+        if (data.user && !data.session) {
+          // Attempt immediate sign in in case project auto-confirms
+          const autoSign = await supabase.auth.signInWithPassword({ email: cleanEmail, password });
+          if (!autoSign.error && autoSign.data.session) {
+            return { error: null, needsEmailConfirmation: false };
+          }
+        }
         return {
-          error: error?.message ?? null,
+          error: null,
           needsEmailConfirmation: Boolean(data.user && !data.session),
         };
+      },
+      resendConfirmation: async (email: string) => {
+        if (!supabase) return { error: 'Cloud accounts are not configured yet.' };
+        const cleanEmail = email.trim();
+        if (!cleanEmail) return { error: 'Enter your email address.' };
+        try {
+          const { error } = await supabase.auth.resend({
+            type: 'signup',
+            email: cleanEmail,
+          });
+          return { error: error?.message ?? null };
+        } catch (err) {
+          return { error: err instanceof Error ? err.message : 'Could not resend email.' };
+        }
       },
       signInWithOAuth: async (provider: 'google' | 'apple') => {
         // Google and Apple OAuth are currently disabled in this Supabase project.

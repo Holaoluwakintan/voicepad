@@ -1,6 +1,7 @@
 import { useFocusEffect } from 'expo-router';
 import { useCallback, useEffect, useState } from 'react';
 import {
+  ActivityIndicator,
   Alert,
   Modal,
   Pressable,
@@ -27,6 +28,7 @@ export default function ProfileScreen() {
     configured,
     signIn,
     signUp,
+    resendConfirmation,
     signInWithOAuth,
     resetPassword,
     updateProfile,
@@ -36,7 +38,10 @@ export default function ProfileScreen() {
   const [notes, setNotes] = useState<Note[]>([]);
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
-  const [busy, setBusy] = useState(false);
+  const [authAction, setAuthAction] = useState<
+    'signIn' | 'signUp' | 'google' | 'apple' | 'sync' | 'resend' | null
+  >(null);
+  const [unconfirmedEmail, setUnconfirmedEmail] = useState<string | null>(null);
   const [syncMessage, setSyncMessage] = useState('');
 
   // Password Reset Modal State
@@ -71,13 +76,13 @@ export default function ProfileScreen() {
       Alert.alert('Check your details', 'Enter an email and a password with at least 6 characters.');
       return;
     }
-    setBusy(true);
+    setAuthAction(mode);
     try {
       await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
     } catch {}
 
     const result = mode === 'signIn' ? await signIn(email, password) : await signUp(email, password);
-    setBusy(false);
+    setAuthAction(null);
 
     if (result.error) {
       try {
@@ -89,7 +94,11 @@ export default function ProfileScreen() {
         await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
       } catch {}
       if ('needsEmailConfirmation' in result && result.needsEmailConfirmation) {
-        Alert.alert('Check your email', 'Confirm your email address, then return here to sign in.');
+        setUnconfirmedEmail(email.trim());
+        Alert.alert(
+          'Confirm your email',
+          `A verification link has been sent to ${email.trim()}.\n\nPlease check your Inbox and Spam/Junk folder, verify your address, and sign in.\n\nDid not get the email? You can resend it below.`
+        );
       } else {
         setSyncMessage('Account ready. Your notes will sync automatically.');
       }
@@ -101,30 +110,39 @@ export default function ProfileScreen() {
     }
   }
 
+  async function handleResendConfirmation() {
+    const target = unconfirmedEmail || email.trim();
+    if (!target) {
+      Alert.alert('Email required', 'Enter your email address to resend the verification link.');
+      return;
+    }
+    setAuthAction('resend');
+    const res = await resendConfirmation(target);
+    setAuthAction(null);
+    if (res.error) {
+      Alert.alert('Resend failed', res.error);
+    } else {
+      Alert.alert(
+        'Confirmation Resent',
+        `A new confirmation email was sent to ${target}.\n\nPlease check your Spam, Junk, or Promotions tab.`
+      );
+    }
+  }
+
   async function handleOAuth(provider: 'google' | 'apple') {
-    setBusy(true);
+    setAuthAction(provider);
     try {
       await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
     } catch {}
 
     const result = await signInWithOAuth(provider);
-    setBusy(false);
+    setAuthAction(null);
 
     if (result.error) {
-      const isUnsupported =
-        result.error.toLowerCase().includes('unsupported') ||
-        result.error.toLowerCase().includes('disabled');
-      if (isUnsupported) {
-        Alert.alert(
-          `${provider === 'google' ? 'Google' : 'Apple'} Sign-In`,
-          `${provider === 'google' ? 'Google' : 'Apple'} login is not enabled in your Supabase dashboard yet.\n\nPlease sign in or create an account using your email and password below!`
-        );
-      } else {
-        Alert.alert(
-          `${provider === 'google' ? 'Google' : 'Apple'} Sign In`,
-          result.error
-        );
-      }
+      Alert.alert(
+        `${provider === 'google' ? 'Google' : 'Apple'} Sign-In`,
+        `${result.error}\n\nPlease sign in or create an account using your email and password below!`
+      );
     }
   }
 
@@ -167,12 +185,12 @@ export default function ProfileScreen() {
 
   async function handleSync() {
     if (!user) return;
-    setBusy(true);
+    setAuthAction('sync');
     try {
       await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
     } catch {}
     const result = await syncNotes(user.id);
-    setBusy(false);
+    setAuthAction(null);
     setSyncMessage(result.ok ? 'Synced just now.' : result.message ?? 'Sync unavailable.');
     if (result.ok) {
       try {
@@ -204,12 +222,12 @@ export default function ProfileScreen() {
           text: 'Delete Account',
           style: 'destructive',
           onPress: async () => {
-            setBusy(true);
+            setAuthAction('sync');
             try {
               await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning);
             } catch {}
             const res = await deleteAccount();
-            setBusy(false);
+            setAuthAction(null);
             if (res.error) {
               Alert.alert('Could not delete account', res.error);
             } else {
@@ -272,17 +290,37 @@ export default function ProfileScreen() {
               {/* 1-Tap OAuth Providers */}
               <View style={styles.oauthRow}>
                 <Pressable
-                  disabled={busy}
+                  disabled={Boolean(authAction)}
                   onPress={() => handleOAuth('google')}
-                  style={styles.googleButton}>
-                  <ThemedText style={styles.oauthText}>🌐 Google</ThemedText>
+                  style={({ pressed }) => [
+                    styles.googleButton,
+                    pressed && styles.oauthPressed,
+                    authAction === 'google' && { opacity: 0.7 },
+                  ]}>
+                  <View style={styles.googleBrandRow}>
+                    <View style={styles.googleGContainer}>
+                      <Text style={styles.googleGLogo}>G</Text>
+                    </View>
+                    <Text style={styles.googleBrandText}>
+                      <Text style={{ color: '#4285F4' }}>G</Text>
+                      <Text style={{ color: '#EA4335' }}>o</Text>
+                      <Text style={{ color: '#FBBC05' }}>o</Text>
+                      <Text style={{ color: '#4285F4' }}>g</Text>
+                      <Text style={{ color: '#34A853' }}>l</Text>
+                      <Text style={{ color: '#EA4335' }}>e</Text>
+                    </Text>
+                  </View>
                 </Pressable>
 
                 <Pressable
-                  disabled={busy}
+                  disabled={Boolean(authAction)}
                   onPress={() => handleOAuth('apple')}
-                  style={styles.appleButton}>
-                  <ThemedText style={styles.appleText}> Apple</ThemedText>
+                  style={({ pressed }) => [
+                    styles.appleButton,
+                    pressed && styles.oauthPressed,
+                    authAction === 'apple' && { opacity: 0.7 },
+                  ]}>
+                  <ThemedText style={styles.appleText}>  Apple</ThemedText>
                 </Pressable>
               </View>
 
@@ -319,12 +357,58 @@ export default function ProfileScreen() {
                 <ThemedText style={styles.forgotText}>Forgot password?</ThemedText>
               </Pressable>
 
-              <Pressable disabled={busy} onPress={() => handleAuth('signIn')} style={styles.primaryButton}>
-                <Text style={styles.primaryText}>{busy ? 'Signing in…' : '✉️  Sign In with Email'}</Text>
+              <Pressable
+                disabled={Boolean(authAction)}
+                onPress={() => handleAuth('signIn')}
+                style={[
+                  styles.primaryButton,
+                  authAction && authAction !== 'signIn' && styles.buttonDimmed,
+                ]}>
+                {authAction === 'signIn' ? (
+                  <View style={styles.buttonLoadingRow}>
+                    <ActivityIndicator size="small" color="#FFFFFF" />
+                    <Text style={styles.primaryText}>  Signing in…</Text>
+                  </View>
+                ) : (
+                  <Text style={styles.primaryText}>✉️  Sign In with Email</Text>
+                )}
               </Pressable>
-              <Pressable disabled={busy} onPress={() => handleAuth('signUp')} style={styles.secondaryButton}>
-                <Text style={styles.secondaryText}>{busy ? 'Please wait…' : '✨  Create Account'}</Text>
+
+              <Pressable
+                disabled={Boolean(authAction)}
+                onPress={() => handleAuth('signUp')}
+                style={[
+                  styles.secondaryButton,
+                  authAction && authAction !== 'signUp' && styles.buttonDimmed,
+                ]}>
+                {authAction === 'signUp' ? (
+                  <View style={styles.buttonLoadingRow}>
+                    <ActivityIndicator size="small" color="#FFFFFF" />
+                    <Text style={styles.secondaryText}>  Creating account…</Text>
+                  </View>
+                ) : (
+                  <Text style={styles.secondaryText}>✨  Create Account</Text>
+                )}
               </Pressable>
+
+              {unconfirmedEmail && (
+                <View style={styles.unconfirmedCard}>
+                  <ThemedText style={styles.unconfirmedTitle}>📩 Verification Email Sent</ThemedText>
+                  <ThemedText style={styles.unconfirmedBody}>
+                    A verification link was sent to{' '}
+                    <ThemedText style={{ fontWeight: '800' }}>{unconfirmedEmail}</ThemedText>.
+                    Please check your Inbox and Spam/Junk folder.
+                  </ThemedText>
+                  <Pressable
+                    disabled={authAction === 'resend'}
+                    onPress={handleResendConfirmation}
+                    style={styles.resendButton}>
+                    <Text style={styles.resendButtonText}>
+                      {authAction === 'resend' ? 'Sending link…' : '🔄 Resend confirmation link'}
+                    </Text>
+                  </Pressable>
+                </View>
+              )}
             </View>
           )}
 
@@ -335,14 +419,14 @@ export default function ProfileScreen() {
                 Your voice notes and audio recordings are securely synced to your private Supabase cloud workspace.
               </ThemedText>
               <View style={styles.accountActions}>
-                <Pressable disabled={busy} onPress={handleSync} style={styles.syncBtn}>
-                  <Text style={styles.primaryText}>{busy ? 'Syncing…' : 'Sync now'}</Text>
+                <Pressable disabled={Boolean(authAction)} onPress={handleSync} style={styles.syncBtn}>
+                  <Text style={styles.primaryText}>{authAction === 'sync' ? 'Syncing…' : 'Sync now'}</Text>
                 </Pressable>
-                <Pressable disabled={busy} onPress={handleSignOut} style={styles.signOutBtn}>
+                <Pressable disabled={Boolean(authAction)} onPress={handleSignOut} style={styles.signOutBtn}>
                   <Text style={styles.secondaryText}>Sign out</Text>
                 </Pressable>
               </View>
-              <Pressable disabled={busy} onPress={confirmDeleteAccount} style={styles.deleteAccountButton}>
+              <Pressable disabled={Boolean(authAction)} onPress={confirmDeleteAccount} style={styles.deleteAccountButton}>
                 <ThemedText style={styles.deleteAccountText}>Delete Account & Data</ThemedText>
               </Pressable>
             </View>
@@ -472,10 +556,43 @@ const styles = StyleSheet.create({
   statLabel: { color: '#687384', fontSize: 11, marginTop: 4, textAlign: 'center' },
   authCard: { width: '100%', maxWidth: 560, backgroundColor: '#FFFFFF', borderRadius: 20, padding: 20, marginTop: 22, borderWidth: 1, borderColor: '#E1E7F0' },
   oauthRow: { flexDirection: 'row', gap: 10, marginTop: 14 },
-  googleButton: { flex: 1, backgroundColor: '#FFFFFF', borderWidth: 1, borderColor: '#D8DEEB', borderRadius: 14, paddingVertical: 12, alignItems: 'center' },
-  appleButton: { flex: 1, backgroundColor: '#000000', borderRadius: 14, paddingVertical: 12, alignItems: 'center' },
-  oauthText: { color: '#182235', fontSize: 14, fontWeight: '700' },
-  appleText: { color: '#FFFFFF', fontSize: 14, fontWeight: '700' },
+  googleButton: {
+    flex: 1,
+    backgroundColor: '#FFFFFF',
+    borderWidth: 1.5,
+    borderColor: '#D8DEEB',
+    borderRadius: 14,
+    paddingVertical: 12,
+    alignItems: 'center',
+    justifyContent: 'center',
+    shadowColor: '#000',
+    shadowOpacity: 0.04,
+    shadowRadius: 4,
+    elevation: 1,
+  },
+  googleBrandRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  googleGContainer: {
+    width: 22,
+    height: 22,
+    borderRadius: 11,
+    backgroundColor: '#FAFBFD',
+    borderWidth: 1,
+    borderColor: '#E1E7F0',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  googleGLogo: { fontSize: 13, fontWeight: '900', color: '#4285F4' },
+  googleBrandText: { fontSize: 15, fontWeight: '800', letterSpacing: 0.5 },
+  appleButton: {
+    flex: 1,
+    backgroundColor: '#000000',
+    borderRadius: 14,
+    paddingVertical: 12,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  appleText: { color: '#FFFFFF', fontSize: 15, fontWeight: '700' },
+  oauthPressed: { opacity: 0.8, transform: [{ scale: 0.98 }] },
   dividerRow: { flexDirection: 'row', alignItems: 'center', marginVertical: 16 },
   dividerLine: { flex: 1, height: 1, backgroundColor: '#E1E7F0' },
   dividerText: { color: '#9AA4B2', fontSize: 12, marginHorizontal: 10 },
@@ -516,6 +633,28 @@ const styles = StyleSheet.create({
     shadowRadius: 4,
   },
   secondaryText: { color: '#FFFFFF', fontWeight: '800', fontSize: 16, textAlign: 'center' },
+  buttonDimmed: { opacity: 0.6 },
+  buttonLoadingRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center' },
+  unconfirmedCard: {
+    backgroundColor: '#EFF6FF',
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: '#BFDBFE',
+    padding: 16,
+    marginTop: 16,
+    alignItems: 'center',
+    gap: 6,
+  },
+  unconfirmedTitle: { color: '#1D4ED8', fontSize: 15, fontWeight: '800' },
+  unconfirmedBody: { color: '#3B82F6', fontSize: 13, textAlign: 'center', lineHeight: 19 },
+  resendButton: {
+    backgroundColor: '#2563EB',
+    borderRadius: 12,
+    paddingHorizontal: 16,
+    paddingVertical: 10,
+    marginTop: 6,
+  },
+  resendButtonText: { color: '#FFFFFF', fontSize: 13, fontWeight: '800' },
   flexAction: { flex: 1, width: 'auto' as any, marginTop: 0 },
   deleteAccountButton: { marginTop: 16, alignItems: 'center', paddingVertical: 10 },
   deleteAccountText: { color: '#DC2626', fontSize: 13, fontWeight: '700' },
