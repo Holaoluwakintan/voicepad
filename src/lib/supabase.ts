@@ -2,13 +2,14 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { createClient } from '@supabase/supabase-js';
 import { Platform } from 'react-native';
 
-const DEFAULT_SUPABASE_URL = 'https://vfwdrpvfcvwsrhxuabak.supabase.co';
-const DEFAULT_SUPABASE_ANON_KEY = 'sb_publishable_c7Dqa3N6mHOmrN64oPDkHw_saVtTEFK';
-
-const rawUrl = process.env.EXPO_PUBLIC_SUPABASE_URL || DEFAULT_SUPABASE_URL;
+// Supabase credentials must be provided via environment variables in .env:
+//   EXPO_PUBLIC_SUPABASE_URL=https://YOUR_PROJECT.supabase.co
+//   EXPO_PUBLIC_SUPABASE_ANON_KEY=YOUR_SUPABASE_ANON_KEY
+// When not set, the app runs in local-only mode (no cloud sync).
+const rawUrl = process.env.EXPO_PUBLIC_SUPABASE_URL?.trim() || '';
 // Strip any accidental /rest/v1 or trailing slashes so auth & storage endpoints resolve properly
 const supabaseUrl = rawUrl.replace(/\/rest\/v1\/?$/, '').replace(/\/+$/, '');
-const supabaseAnonKey = process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY || DEFAULT_SUPABASE_ANON_KEY;
+const supabaseAnonKey = process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY?.trim() || '';
 
 export const isSupabaseConfigured = Boolean(supabaseUrl && supabaseAnonKey);
 
@@ -29,3 +30,17 @@ export const supabase = isSupabaseConfigured
       },
     })
   : null;
+
+/**
+ * Returns Authorization header with Supabase access token if user is signed in.
+ */
+export async function getAuthHeaders(): Promise<Record<string, string>> {
+  if (!supabase) return {};
+  try {
+    const { data } = await supabase.auth.getSession();
+    if (data?.session?.access_token) {
+      return { Authorization: `Bearer ${data.session.access_token}` };
+    }
+  } catch {}
+  return {};
+}

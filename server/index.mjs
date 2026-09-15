@@ -22,10 +22,118 @@ const requestsByIp = new Map();
 const rateWindowMs = 60_000;
 const maxRequestsPerWindow = Number(process.env.MAX_REQUESTS_PER_MINUTE ?? 10);
 
+// Periodically clean up stale IPs to avoid unbounded memory growth
+setInterval(() => {
+  const now = Date.now();
+  for (const [ip, timestamps] of requestsByIp.entries()) {
+    const recent = timestamps.filter((timestamp) => now - timestamp < rateWindowMs);
+    if (recent.length === 0) {
+      requestsByIp.delete(ip);
+    } else {
+      requestsByIp.set(ip, recent);
+    }
+  }
+}, 5 * 60_000).unref?.();
+
 app.use(express.json({ limit: '25mb' }));
 app.use(express.urlencoded({ extended: true, limit: '25mb' }));
+app.use(cors({
+  origin: allowedOrigins.includes('*') ? true : allowedOrigins,
+  credentials: true,
+}));
 
 app.get('/health', (_req, res) => res.json({ ok: true, service: 'voicepad-transcription' }));
+
+const termsSections = [
+  { title: '1. Acceptance of Terms', content: 'By downloading, accessing, or using VoicePad, you agree to be legally bound by these Terms of Service.' },
+  { title: '2. Eligibility & Account Responsibilities', content: 'You must be at least 13 years of age (16 in the EEA) to use VoicePad. You are responsible for safeguarding your account credentials.' },
+  { title: '3. Audio Recording & Multi-Party Consent Laws', content: 'IMPORTANT NOTICE: Audio recording consent laws vary by jurisdiction. You covenant that you have obtained all necessary permissions before recording any individual. VoicePad bears zero liability for unconsented recordings made by users.' },
+  { title: '4. AI Transcription & Summary Disclaimer', content: 'Transcriptions and summaries are probabilistic machine learning outputs. VoicePad makes no warranty regarding absolute accuracy. The service is NOT intended for court reporting, emergency, or medical transcription.' },
+  { title: '5. Intellectual Property & User Ownership', content: 'You retain 100% ownership of your audio, notes, and transcripts. VoicePad does NOT sell or train public AI models on your private data.' },
+  { title: '6. Prohibited Activities', content: 'Prohibited activities include illegal surveillance, harassing content, reverse engineering, and automated abuse.' },
+  { title: '7. Limitation of Liability', content: 'VoicePad is provided AS IS. To the maximum extent permitted by law, VoicePad shall not be liable for incidental, special, or consequential damages.' },
+  { title: '8. Account Deletion', content: 'You may delete your account and all associated cloud notes and recordings at any time in the app settings.' },
+];
+
+const privacySections = [
+  { title: '1. Commitment to Privacy', content: 'VoicePad is designed on a local-first privacy architecture. Your private data is never sold or used for advertising.' },
+  { title: '2. Information We Collect', content: 'We collect account credentials (if you sign in), recorded audio and scanned photos (solely when you request transcription), and diagnostic metadata.' },
+  { title: '3. Local-First Processing', content: 'VoicePad functions fully offline. If you do not create a cloud sync account, your notes never leave your device except when you explicitly initiate AI transcription.' },
+  { title: '4. AI Subprocessors (Groq Whisper & Llama)', content: 'Audio and images are transmitted over encrypted TLS directly to our secure proxy and processed ephemerally on enterprise infrastructure without retention for model training.' },
+  { title: '5. Cloud Storage & Security', content: 'Cloud notes are protected by PostgreSQL Row Level Security (RLS). Audio files are stored in private buckets accessible only via short-lived signed URLs.' },
+  { title: '6. User Rights & Data Erasure', content: 'Under GDPR and CCPA, you have full rights to export your data or permanently delete your account and all stored records.' },
+  { title: '7. Permissions', content: 'Microphone, Camera, and Photo permissions are used strictly for recording voice notes and scanning documents for text extraction.' },
+];
+
+function renderLegalHtml(title, sections) {
+  const cards = sections
+    .map((s) => `<div class="card"><h2>${s.title}</h2><p>${s.content}</p></div>`)
+    .join('\n');
+  return `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>${title} - VoicePad</title>
+  <style>
+    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background: #F1F5FB; color: #182235; margin: 0; padding: 36px 16px; line-height: 1.6; }
+    .container { max-width: 740px; margin: 0 auto; }
+    header { text-align: center; margin-bottom: 28px; }
+    .eyebrow { color: #6D5DFB; font-size: 13px; font-weight: 800; letter-spacing: 2px; text-transform: uppercase; margin-bottom: 6px; }
+    h1 { font-size: 32px; font-weight: 800; margin: 0 0 8px 0; }
+    .updated { color: #687384; font-size: 14px; }
+    .card { background: #FFFFFF; border-radius: 16px; border: 1px solid #E1E7F0; padding: 22px; margin-bottom: 14px; box-shadow: 0 4px 12px rgba(24,34,53,0.04); }
+    h2 { font-size: 18px; margin-top: 0; margin-bottom: 8px; color: #182235; }
+    p { margin: 0; color: #4A5568; font-size: 15px; }
+    footer { text-align: center; color: #9AA4B2; font-size: 13px; margin-top: 36px; }
+    a { color: #6D5DFB; text-decoration: none; font-weight: 600; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <header>
+      <div class="eyebrow">VoicePad Official Legal</div>
+      <h1>${title}</h1>
+      <div class="updated">Effective: September 14, 2026</div>
+    </header>
+    ${cards}
+    <footer>
+      &copy; 2026 VoicePad. All rights reserved. &bull; <a href="/privacy">Privacy Policy</a> &bull; <a href="/terms">Terms of Service</a>
+    </footer>
+  </div>
+</body>
+</html>`;
+}
+
+app.get('/privacy', (_req, res) => res.type('html').send(renderLegalHtml('Privacy Policy', privacySections)));
+app.get('/terms', (_req, res) => res.type('html').send(renderLegalHtml('Terms of Service', termsSections)));
+
+const supabaseUrl = (process.env.SUPABASE_URL ?? process.env.EXPO_PUBLIC_SUPABASE_URL ?? '').trim();
+const supabaseAnonKey = (process.env.SUPABASE_ANON_KEY ?? process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY ?? '').trim();
+const requireAuth = process.env.REQUIRE_AUTH === 'true';
+
+async function authMiddleware(req, res, next) {
+  const authHeader = req.headers.authorization;
+  if (authHeader && authHeader.startsWith('Bearer ') && supabaseUrl) {
+    try {
+      const resp = await fetch(`${supabaseUrl}/auth/v1/user`, {
+        headers: {
+          Authorization: authHeader,
+          apikey: supabaseAnonKey,
+        },
+      });
+      if (resp.ok) {
+        req.user = await resp.json();
+      }
+    } catch {}
+  }
+
+  if (requireAuth && !req.user) {
+    return res.status(401).json({ error: 'Authentication required. Please sign in to use AI transcription.' });
+  }
+
+  next();
+}
 
 app.get('/models', async (_req, res) => {
   if (!process.env.GROQ_API_KEY) return res.status(500).json({ error: 'GROQ_API_KEY is not configured on the server.' });
@@ -55,7 +163,7 @@ function rateLimitMiddleware(req, res, next) {
   next();
 }
 
-app.post('/transcribe', rateLimitMiddleware, upload.single('file'), async (req, res) => {
+app.post('/transcribe', authMiddleware, rateLimitMiddleware, upload.single('file'), async (req, res) => {
   if (!process.env.GROQ_API_KEY) return res.status(500).json({ error: 'GROQ_API_KEY is not configured on the server.' });
   if (!req.file) return res.status(400).json({ error: 'Audio file is required.' });
   const isAudio =
@@ -113,7 +221,7 @@ app.post('/transcribe', rateLimitMiddleware, upload.single('file'), async (req, 
   return res.status(502).json({ error: 'Transcription provider could not process the audio. Please retry.' });
 });
 
-app.post('/summarize', rateLimitMiddleware, async (req, res) => {
+app.post('/summarize', authMiddleware, rateLimitMiddleware, async (req, res) => {
   if (!process.env.GROQ_API_KEY) return res.status(500).json({ error: 'GROQ_API_KEY is not configured on the server.' });
 
   const text = req.body?.text;
@@ -188,7 +296,7 @@ app.post('/summarize', rateLimitMiddleware, async (req, res) => {
 });
 
 // Image-to-Text OCR Vision Endpoint (Llama 3.2 Vision)
-app.post('/ocr', rateLimitMiddleware, upload.single('image'), async (req, res) => {
+app.post('/ocr', authMiddleware, rateLimitMiddleware, upload.single('image'), async (req, res) => {
   if (!process.env.GROQ_API_KEY) return res.status(500).json({ error: 'GROQ_API_KEY is not configured on the server.' });
 
   let base64Data = '';

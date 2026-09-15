@@ -2,7 +2,10 @@ import { Session, User } from '@supabase/supabase-js';
 import { PropsWithChildren, createContext, useContext, useEffect, useMemo, useState } from 'react';
 import { Platform } from 'react-native';
 import * as Linking from 'expo-linking';
+import * as WebBrowser from 'expo-web-browser';
 import { isSupabaseConfigured, supabase } from './supabase';
+
+WebBrowser.maybeCompleteAuthSession();
 
 
 type AuthContextValue = {
@@ -28,6 +31,7 @@ export function AuthProvider({ children }: PropsWithChildren) {
 
   useEffect(() => {
     if (!supabase) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
       setLoading(false);
       return;
     }
@@ -95,13 +99,45 @@ export function AuthProvider({ children }: PropsWithChildren) {
         }
       },
       signInWithOAuth: async (provider: 'google' | 'apple') => {
-        // Google and Apple OAuth are currently disabled in this Supabase project.
-        // Only Email/Password sign-in is enabled. Return a friendly message instead
-        // of letting Supabase open a browser page with a raw JSON 400 error.
-        return {
-          error:
-            `${provider === 'google' ? 'Google' : 'Apple'} sign-in is not yet available.\n\nPlease use your email and password to sign in or create an account.`,
-        };
+        if (!supabase) return { error: 'Cloud accounts are not configured yet.' };
+        try {
+          const redirectUrl =
+            Platform.OS === 'web'
+              ? (typeof window !== 'undefined' ? window.location.origin : undefined)
+              : Linking.createURL('auth/callback');
+
+          const { data, error } = await supabase.auth.signInWithOAuth({
+            provider,
+            options: {
+              redirectTo: redirectUrl,
+              skipBrowserRedirect: Platform.OS !== 'web',
+            },
+          });
+
+          if (error) return { error: error.message };
+
+          if (Platform.OS !== 'web' && data?.url) {
+            const result = await WebBrowser.openAuthSessionAsync(data.url, redirectUrl);
+            if (result.type === 'success' && result.url) {
+              const parsed = Linking.parse(result.url);
+              const code = parsed.queryParams?.code;
+              if (typeof code === 'string') {
+                const { data: sessionData, error: exchangeError } =
+                  await supabase.auth.exchangeCodeForSession(code);
+                if (exchangeError) return { error: exchangeError.message };
+                if (sessionData?.session) {
+                  setSession(sessionData.session);
+                }
+              }
+            }
+          }
+
+          return { error: null };
+        } catch (err) {
+          return {
+            error: err instanceof Error ? err.message : `Could not initiate ${provider} sign in.`,
+          };
+        }
       },
       resetPassword: async (email: string) => {
         if (!supabase) return { error: 'Cloud accounts are not configured yet.' };
@@ -134,16 +170,19 @@ export function AuthProvider({ children }: PropsWithChildren) {
       deleteAccount: async () => {
         if (!supabase) return { error: null };
         try {
-          try {
-            await supabase.rpc('delete_user_account');
-          } catch {}
+          const { error: rpcError } = await supabase.rpc('delete_user_account');
           await supabase.auth.signOut();
           setSession(null);
+          if (rpcError) {
+            return {
+              error: `Signed out, but server data deletion encountered an issue: ${rpcError.message}`,
+            };
+          }
           return { error: null };
         } catch (err) {
           await supabase.auth.signOut();
           setSession(null);
-          return { error: null };
+          return { error: err instanceof Error ? err.message : 'Could not delete account' };
         }
       },
       signOut: async () => {

@@ -68,6 +68,5 @@ const styles = StyleSheet.create({
   bar: {
     width: 6,
     borderRadius: 4,
-    transitionProperty: 'height',
   },
 });

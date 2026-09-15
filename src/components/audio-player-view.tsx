@@ -6,10 +6,12 @@ import { useAudioPlayer, useAudioPlayerStatus } from 'expo-audio';
 import { ThemedText } from './themed-text';
 import { formatDuration } from '@/lib/notes';
 
-const ACCENT = '#6D5DFB';
-const INK = '#17152A';
-const MUTED = '#79768A';
-const TRACK_BG = '#E5E7EB';
+import { DS } from '@/constants/design';
+
+const ACCENT = DS.colors.primary;
+const INK = DS.colors.ink;
+const MUTED = DS.colors.muted;
+const TRACK_BG = DS.colors.border;
 
 const SPEEDS = [1.0, 1.25, 1.5, 2.0];
 

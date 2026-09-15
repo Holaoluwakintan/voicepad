@@ -1,9 +1,5 @@
-import { Platform } from 'react-native';
-
-const defaultUrl = 'https://voicepad-transcription.onrender.com';
-
-const TRANSCRIPTION_API_URL =
-  process.env.EXPO_PUBLIC_TRANSCRIPTION_API_URL?.trim() || defaultUrl;
+import { TRANSCRIPTION_API_URL } from '@/lib/utils';
+import { getAuthHeaders } from '@/lib/supabase';
 
 export type SummaryResult = {
   summary: string;
@@ -20,6 +16,7 @@ export async function generateAISummary(transcript: string): Promise<SummaryResu
     throw new Error('Transcript text is empty.');
   }
 
+  const authHeaders = await getAuthHeaders();
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), 60_000);
 
@@ -28,6 +25,7 @@ export async function generateAISummary(transcript: string): Promise<SummaryResu
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
+        ...authHeaders,
       },
       body: JSON.stringify({ text: clean }),
       signal: controller.signal,
@@ -71,6 +69,7 @@ export async function transcribeImage(base64Image: string, mimeType = 'image/jpe
   const clean = base64Image?.trim();
   if (!clean) throw new Error('Image data is empty.');
 
+  const authHeaders = await getAuthHeaders();
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), 60_000);
 
@@ -79,6 +78,7 @@ export async function transcribeImage(base64Image: string, mimeType = 'image/jpe
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
+        ...authHeaders,
       },
       body: JSON.stringify({
         image: clean.startsWith('data:') ? clean : `data:${mimeType};base64,${clean}`,

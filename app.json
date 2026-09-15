@@ -64,7 +64,8 @@
           "photosPermission": "VoicePad needs photo library access to transcribe notes from pictures.",
           "cameraPermission": "VoicePad needs camera access to scan notes and whiteboards."
         }
-      ]
+      ],
+      "expo-document-picker"
     ],
     "experiments": {
       "typedRoutes": true,

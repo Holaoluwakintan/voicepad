@@ -13,6 +13,8 @@ export default function AppTabs() {
       backgroundColor={colors.background}
       indicatorColor={colors.backgroundElement}
       labelStyle={{ selected: { color: colors.text } }}>
+
+      {/* Tab 1 — Home: voice notes feed */}
       <NativeTabs.Trigger name="index">
         <NativeTabs.Trigger.Label>Home</NativeTabs.Trigger.Label>
         <NativeTabs.Trigger.Icon
@@ -23,6 +25,17 @@ export default function AppTabs() {
         />
       </NativeTabs.Trigger>
 
+      {/* Tab 2 — Scan: photo to text */}
+      <NativeTabs.Trigger name="scan">
+        <NativeTabs.Trigger.Label>Scan</NativeTabs.Trigger.Label>
+        <NativeTabs.Trigger.Icon
+          sf={{ default: 'camera.viewfinder', selected: 'camera.fill' }}
+          md={{ default: 'document_scanner', selected: 'document_scanner' }}
+          renderingMode="template"
+        />
+      </NativeTabs.Trigger>
+
+      {/* Tab 3 — Notepad: write & saved text notes */}
       <NativeTabs.Trigger name="notes">
         <NativeTabs.Trigger.Label>Notes</NativeTabs.Trigger.Label>
         <NativeTabs.Trigger.Icon
@@ -33,6 +46,7 @@ export default function AppTabs() {
         />
       </NativeTabs.Trigger>
 
+      {/* Tab 4 — Profile: account & sync */}
       <NativeTabs.Trigger name="profile">
         <NativeTabs.Trigger.Label>Profile</NativeTabs.Trigger.Label>
         <NativeTabs.Trigger.Icon

@@ -1,14 +1,12 @@
 import { File, UploadType } from 'expo-file-system';
 import { Platform } from 'react-native';
 
-const defaultUrl = 'https://voicepad-transcription.onrender.com';
-
-const TRANSCRIPTION_API_URL =
-  process.env.EXPO_PUBLIC_TRANSCRIPTION_API_URL?.trim() || defaultUrl;
+import { TRANSCRIPTION_API_URL } from '@/lib/utils';
+import { getAuthHeaders } from '@/lib/supabase';
 
 export type TranscriptionResult = {
   text: string;
-  languages?: Array<{ code: string }>;
+  languages?: { code: string }[];
 };
 
 export async function transcribeAudio(
@@ -16,6 +14,7 @@ export async function transcribeAudio(
   options: { noteId: string; filename?: string },
 ): Promise<TranscriptionResult> {
   const nativeFilename = options.filename ?? `voicepad-${options.noteId}.m4a`;
+  const authHeaders = await getAuthHeaders();
 
   // On Native (Android / iOS), first attempt native File.upload for robust background streaming
   if (Platform.OS !== 'web') {
@@ -36,6 +35,7 @@ export async function transcribeAudio(
           },
           headers: {
             Accept: 'application/json',
+            ...authHeaders,
           },
           signal: controller.signal,
         });
@@ -97,6 +97,9 @@ export async function transcribeAudio(
   try {
     response = await fetch(`${TRANSCRIPTION_API_URL}/transcribe`, {
       method: 'POST',
+      headers: {
+        ...authHeaders,
+      },
       body: form,
       signal: controller.signal,
     });

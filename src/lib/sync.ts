@@ -118,11 +118,25 @@ export async function syncNotes(userId: string): Promise<SyncResult> {
           const remoteTime = new Date(remote.updatedAt || remote.createdAt).getTime();
 
           if (remoteTime > localTime) {
-            // Remote is newer: preserve local audioUri if matching, but accept remote metadata
-            mergedMap.set(remote.id, {
-              ...remote,
-              audioUri: local.audioUri || remote.audioUri,
-            });
+            const hasContentConflict =
+              Boolean(local.content?.trim()) &&
+              Boolean(remote.content?.trim()) &&
+              local.content.trim() !== remote.content.trim();
+
+            if (hasContentConflict && !remote.content.includes(local.content.trim())) {
+              // Non-destructive merge: preserve local changes so thoughts are never lost
+              const preservedContent = `${remote.content}\n\n--- [Local edits preserved during sync] ---\n${local.content}`;
+              mergedMap.set(remote.id, {
+                ...remote,
+                content: preservedContent,
+                audioUri: local.audioUri || remote.audioUri,
+              });
+            } else {
+              mergedMap.set(remote.id, {
+                ...remote,
+                audioUri: local.audioUri || remote.audioUri,
+              });
+            }
           }
         }
       }
