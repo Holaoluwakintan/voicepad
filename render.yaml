@@ -23,3 +23,7 @@ services:
         sync: false
       - key: REQUIRE_AUTH
         value: "false"
+      - key: GEMINI_API_KEY
+        sync: false
+      - key: GROQ_API_KEY_BACKUP
+        sync: false
