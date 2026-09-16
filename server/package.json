@@ -2,6 +2,7 @@
   "name": "voicepad-transcription-server",
   "private": true,
   "type": "module",
+  "main": "index.mjs",
   "scripts": {
     "start": "node index.mjs"
   },
