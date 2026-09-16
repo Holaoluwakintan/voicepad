@@ -34,7 +34,7 @@ import {
 } from '@/lib/notes';
 import { getSignedAudioUrl } from '@/lib/storage';
 import { DS } from '@/constants/design';
-import { formatNoteDate } from '@/lib/utils';
+import { formatNoteDate, toFriendlyErrorMessage } from '@/lib/utils';
 
 export default function NoteDetailScreen() {
   const router = useRouter();
@@ -127,7 +127,7 @@ export default function NoteDetailScreen() {
         await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
       } catch {}
     } catch (error) {
-      const message = error instanceof Error ? error.message : 'Could not generate summary';
+      const message = toFriendlyErrorMessage(error, 'Could not generate summary. Please retry.');
       Alert.alert('AI Summary', message);
     } finally {
       setIsSummarizing(false);
@@ -154,7 +154,7 @@ export default function NoteDetailScreen() {
       } catch {}
       await loadNote();
     } catch (error) {
-      const message = error instanceof Error ? error.message : 'Transcription failed';
+      const message = toFriendlyErrorMessage(error, 'Transcription failed. Please retry.');
       setNote((current) =>
         current
           ? { ...current, transcriptionStatus: 'failed', transcriptionError: message }

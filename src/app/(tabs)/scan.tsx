@@ -24,12 +24,13 @@ import { ThemedView } from '@/components/themed-view';
 import { transcribeImage } from '@/lib/ai';
 import { insertNote } from '@/lib/notes';
 import { DS } from '@/constants/design';
-import { generateNoteId } from '@/lib/utils';
+import { generateNoteId, toFriendlyErrorMessage } from '@/lib/utils';
 
 type ScanState = 'idle' | 'scanning' | 'done' | 'error';
 
 export default function ScanScreen() {
   const [scanState, setScanState] = useState<ScanState>('idle');
+  const [scanProgress, setScanProgress] = useState<{ current: number; total: number } | null>(null);
   const [extractedText, setExtractedText] = useState('');
   const [extractedTitle, setExtractedTitle] = useState('');
   const [errorMessage, setErrorMessage] = useState('');
@@ -38,6 +39,7 @@ export default function ScanScreen() {
 
   const reset = useCallback(() => {
     setScanState('idle');
+    setScanProgress(null);
     setExtractedText('');
     setExtractedTitle('');
     setErrorMessage('');
@@ -74,18 +76,20 @@ export default function ScanScreen() {
           );
           return;
         }
+        // Support picking multiple pages or books simultaneously (up to 20 at once)
         result = await ImagePicker.launchImageLibraryAsync({
           mediaTypes: ['images'],
           quality: 0.7,
           base64: true,
+          allowsMultipleSelection: true,
+          selectionLimit: 20,
         });
       }
 
-      if (result.canceled || !result.assets?.[0]) return;
-      const asset = result.assets[0];
-
-      if (!asset.base64) {
-        Alert.alert('Could not read image', 'Please try a different photo.');
+      if (result.canceled || !result.assets || result.assets.length === 0) return;
+      const validAssets = result.assets.filter((a) => Boolean(a.base64));
+      if (validAssets.length === 0) {
+        Alert.alert('Could not read image', 'Please select a valid image file.');
         return;
       }
 
@@ -93,18 +97,48 @@ export default function ScanScreen() {
       setExtractedTitle('');
       setSavedToNotes(false);
       setScanState('scanning');
+      setScanProgress({ current: 1, total: validAssets.length });
       try { Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium); } catch {}
 
-      const mimeType = asset.mimeType || 'image/jpeg';
-      const ocr = await transcribeImage(asset.base64, mimeType);
+      const pageTexts: { page: number; text: string }[] = [];
+      for (let i = 0; i < validAssets.length; i++) {
+        setScanProgress({ current: i + 1, total: validAssets.length });
+        const asset = validAssets[i];
+        const mimeType = asset.mimeType || 'image/jpeg';
+        try {
+          const ocr = await transcribeImage(asset.base64!, mimeType);
+          if (ocr.text.trim()) {
+            pageTexts.push({ page: i + 1, text: ocr.text.trim() });
+          }
+        } catch (pageErr) {
+          console.warn(`Error transcribing page ${i + 1}`, pageErr);
+        }
+      }
 
-      setExtractedText(ocr.text);
-      setExtractedTitle(ocr.title || 'Scanned Note');
+      if (pageTexts.length === 0) {
+        throw new Error('No readable text could be extracted from the selected images. Please ensure the photos are clear.');
+      }
+
+      let finalTitle = '';
+      let combinedContent = '';
+
+      if (pageTexts.length === 1) {
+        finalTitle = pageTexts[0].text.split('\n')[0]?.trim().slice(0, 50) || 'Scanned Note';
+        combinedContent = pageTexts[0].text;
+      } else {
+        finalTitle = `Book / Multi-Page Scan (${pageTexts.length} pages)`;
+        combinedContent = pageTexts
+          .map((p) => `### 📖 Page ${p.page}\n\n${p.text}`)
+          .join('\n\n---\n\n');
+      }
+
+      setExtractedText(combinedContent);
+      setExtractedTitle(finalTitle);
       setScanState('done');
       try { Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success); } catch {}
 
     } catch (err) {
-      const message = err instanceof Error ? err.message : 'Could not read text from image.';
+      const message = toFriendlyErrorMessage(err, 'Could not read text from the selected image(s). Please try again.');
       setErrorMessage(message);
       setScanState('error');
       try { Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error); } catch {}
@@ -162,18 +196,28 @@ export default function ScanScreen() {
                 onPress={() => pickImage(true)}
                 style={({ pressed }) => [styles.actionCard, styles.actionCardCamera, pressed && styles.pressed]}
               >
-                <ThemedText style={styles.actionCardEmoji}>📷</ThemedText>
-                <ThemedText style={styles.actionCardTitle}>Take a Photo</ThemedText>
-                <ThemedText style={styles.actionCardSub}>Use your camera now</ThemedText>
+                <View style={styles.actionCardIconBadgeCamera}>
+                  <ThemedText style={styles.actionCardEmoji}>📷</ThemedText>
+                </View>
+                <ThemedText style={styles.actionCardTitleCamera}>Take a Photo</ThemedText>
+                <ThemedText style={styles.actionCardSubCamera}>Snap single page or note</ThemedText>
+                <View style={styles.pillBadgeCamera}>
+                  <ThemedText style={styles.pillBadgeCameraText}>Single snapshot</ThemedText>
+                </View>
               </Pressable>
 
               <Pressable
                 onPress={() => pickImage(false)}
                 style={({ pressed }) => [styles.actionCard, styles.actionCardGallery, pressed && styles.pressed]}
               >
-                <ThemedText style={styles.actionCardEmoji}>🖼️</ThemedText>
-                <ThemedText style={styles.actionCardTitle}>Upload Image</ThemedText>
-                <ThemedText style={styles.actionCardSub}>From your photo library</ThemedText>
+                <View style={styles.actionCardIconBadgeGallery}>
+                  <ThemedText style={styles.actionCardEmoji}>📚</ThemedText>
+                </View>
+                <ThemedText style={styles.actionCardTitleGallery}>Upload Photos / Books</ThemedText>
+                <ThemedText style={styles.actionCardSubGallery}>From library or files</ThemedText>
+                <View style={styles.pillBadgeGallery}>
+                  <ThemedText style={styles.pillBadgeGalleryText}>Batch: up to 20 pages</ThemedText>
+                </View>
               </Pressable>
             </Animated.View>
           )}
@@ -182,9 +226,15 @@ export default function ScanScreen() {
           {scanState === 'scanning' && (
             <Animated.View entering={FadeIn.duration(300)} style={styles.scanningBox}>
               <ActivityIndicator size="large" color={DS.colors.primary} />
-              <ThemedText style={styles.scanningTitle}>Reading your image…</ThemedText>
+              <ThemedText style={styles.scanningTitle}>
+                {scanProgress && scanProgress.total > 1
+                  ? `Reading page ${scanProgress.current} of ${scanProgress.total}…`
+                  : 'Reading your image…'}
+              </ThemedText>
               <ThemedText style={styles.scanningSubtitle}>
-                AI is extracting all the text from your photo.{'\n'}This usually takes 5–15 seconds.
+                {scanProgress && scanProgress.total > 1
+                  ? `Processing document batch (${scanProgress.total} pages). Please keep the app open.`
+                  : 'AI is extracting all the text from your photo.\nThis usually takes 5–15 seconds.'}
               </ThemedText>
               {/* Animated scanning line */}
               <View style={styles.scanLineContainer}>
@@ -332,31 +382,88 @@ const styles = StyleSheet.create({
   },
   actionCard: {
     flex: 1,
-    borderRadius: DS.radius.lg,
-    padding: 22,
+    borderRadius: DS.radius.xl,
+    paddingVertical: 24,
+    paddingHorizontal: 16,
     alignItems: 'center',
     ...DS.shadow.card,
   },
   actionCardCamera: {
-    backgroundColor: DS.colors.primary,
+    backgroundColor: '#3730A3',
+    borderWidth: 1.5,
+    borderColor: '#4F46E5',
   },
   actionCardGallery: {
-    backgroundColor: DS.colors.surface,
-    borderWidth: 1,
-    borderColor: DS.colors.border,
+    backgroundColor: '#EEF2FF',
+    borderWidth: 1.5,
+    borderColor: '#C7D2FE',
   },
-  actionCardEmoji: { fontSize: 36, marginBottom: 12 },
-  actionCardTitle: {
+  actionCardIconBadgeCamera: {
+    width: 60,
+    height: 60,
+    borderRadius: 30,
+    backgroundColor: 'rgba(255,255,255,0.18)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginBottom: 12,
+  },
+  actionCardIconBadgeGallery: {
+    width: 60,
+    height: 60,
+    borderRadius: 30,
+    backgroundColor: '#E0E7FF',
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginBottom: 12,
+  },
+  actionCardEmoji: { fontSize: 32 },
+  actionCardTitleCamera: {
     fontSize: DS.font.bodyMd,
     fontWeight: '800',
-    color: DS.colors.surface,
+    color: '#FFFFFF',
     textAlign: 'center',
     marginBottom: 4,
   },
-  actionCardSub: {
+  actionCardSubCamera: {
     fontSize: DS.font.xxs,
-    color: 'rgba(255,255,255,0.75)',
+    color: 'rgba(255,255,255,0.85)',
     textAlign: 'center',
+    marginBottom: 12,
+  },
+  actionCardTitleGallery: {
+    fontSize: DS.font.bodyMd,
+    fontWeight: '800',
+    color: '#1E1B4B',
+    textAlign: 'center',
+    marginBottom: 4,
+  },
+  actionCardSubGallery: {
+    fontSize: DS.font.xxs,
+    color: '#4338CA',
+    textAlign: 'center',
+    marginBottom: 12,
+  },
+  pillBadgeCamera: {
+    backgroundColor: 'rgba(255,255,255,0.22)',
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: DS.radius.xs,
+  },
+  pillBadgeCameraText: {
+    fontSize: DS.font.caption,
+    fontWeight: '700',
+    color: '#FFFFFF',
+  },
+  pillBadgeGallery: {
+    backgroundColor: '#4338CA',
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: DS.radius.xs,
+  },
+  pillBadgeGalleryText: {
+    fontSize: DS.font.caption,
+    fontWeight: '700',
+    color: '#FFFFFF',
   },
 
   // Scanning

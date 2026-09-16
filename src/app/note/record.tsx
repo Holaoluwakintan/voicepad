@@ -36,11 +36,11 @@ import { ThemedView } from '@/components/themed-view';
 import { AudioWaveform } from '@/components/audio-waveform';
 import { AudioPlayerView } from '@/components/audio-player-view';
 import { insertNote, updateNote, Note, loadNotes, NoteCategory, removeNote } from '@/lib/notes';
-import { transcribeAudio } from '@/lib/transcription';
+import { transcribeAudio, wakeUpTranscriptionServer } from '@/lib/transcription';
 import { uploadAudioToCloud } from '@/lib/storage';
 import { useAuth } from '@/lib/auth';
 import { DS } from '@/constants/design';
-import { generateNoteId, isSupportedAudio, SUPPORTED_AUDIO_EXTENSIONS } from '@/lib/utils';
+import { generateNoteId, isSupportedAudio, SUPPORTED_AUDIO_EXTENSIONS, toFriendlyErrorMessage } from '@/lib/utils';
 
 type TranscriptState = 'idle' | 'saving' | 'transcribing' | 'ready' | 'failed';
 
@@ -110,6 +110,8 @@ export default function RecordScreen() {
   }));
 
   useEffect(() => {
+    // Pre-warm the cloud transcription server while the user prepares to record
+    wakeUpTranscriptionServer();
     (async () => {
       const result = await AudioModule.requestRecordingPermissionsAsync();
       setPermission(result.granted ? 'granted' : 'denied');
@@ -265,7 +267,7 @@ export default function RecordScreen() {
       setTranscriptState('ready');
       try { Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success); } catch {}
     } catch (error) {
-      const message = error instanceof Error ? error.message : 'Unknown transcription error';
+      const message = toFriendlyErrorMessage(error, 'Transcription could not be completed. Please try again.');
       await updateNote(noteId, { transcriptionStatus: 'failed', transcriptionError: message });
       setTranscriptError(message);
       setTranscriptState('failed');
@@ -370,7 +372,7 @@ export default function RecordScreen() {
               <ThemedText style={styles.transcribingText}>
                 ⏳  Transcribing your audio…{'\n'}
                 <ThemedText style={styles.transcribingNote}>
-                  This takes 5–20 seconds. Stay on this screen.
+                  Connecting to AI service. (If the server is waking up, this may take ~30s).
                 </ThemedText>
               </ThemedText>
             </View>

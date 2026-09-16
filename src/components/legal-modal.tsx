@@ -3,7 +3,7 @@
  * Displays full, professional Terms of Service and Privacy Policy
  * with segmented switching, section formatting, and clean scroll view.
  */
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import {
   Modal,
   Pressable,
@@ -26,6 +26,13 @@ interface LegalModalProps {
 
 export function LegalModal({ visible, initialDoc = 'terms', onClose }: LegalModalProps) {
   const [activeDoc, setActiveDoc] = useState<'terms' | 'privacy'>(initialDoc);
+
+  useEffect(() => {
+    if (visible && initialDoc) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
+      setActiveDoc(initialDoc);
+    }
+  }, [visible, initialDoc]);
 
   const docData = activeDoc === 'terms' ? TERMS_OF_SERVICE : PRIVACY_POLICY;
 

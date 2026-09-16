@@ -1,7 +1,7 @@
 import { File, UploadType } from 'expo-file-system';
 import { Platform } from 'react-native';
 
-import { TRANSCRIPTION_API_URL } from '@/lib/utils';
+import { TRANSCRIPTION_API_URL, toFriendlyErrorMessage } from '@/lib/utils';
 import { getAuthHeaders } from '@/lib/supabase';
 
 export type TranscriptionResult = {
@@ -9,9 +9,22 @@ export type TranscriptionResult = {
   languages?: { code: string }[];
 };
 
-export async function transcribeAudio(
+// ─── Background Pre-Warming Ping ─────────────────────────────────────────────
+/**
+ * Fires a lightweight background ping to the server to initiate container
+ * spin-up ahead of time (e.g. while the user is recording or choosing files).
+ */
+export function wakeUpTranscriptionServer(): void {
+  try {
+    fetch(`${TRANSCRIPTION_API_URL}/health`, { method: 'GET' }).catch(() => {});
+  } catch {}
+}
+
+const REQUEST_TIMEOUT_MS = 120_000; // 2 minutes to comfortably absorb Render cold starts
+
+async function performTranscriptionAttempt(
   audioUri: string,
-  options: { noteId: string; filename?: string },
+  options: { noteId: string; filename?: string }
 ): Promise<TranscriptionResult> {
   const nativeFilename = options.filename ?? `voicepad-${options.noteId}.m4a`;
   const authHeaders = await getAuthHeaders();
@@ -21,7 +34,7 @@ export async function transcribeAudio(
     try {
       const file = new File(audioUri);
       const controller = new AbortController();
-      const timeout = setTimeout(() => controller.abort(), 75_000);
+      const timeout = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
 
       try {
         const uploadResult = await file.upload(`${TRANSCRIPTION_API_URL}/transcribe`, {
@@ -57,7 +70,7 @@ export async function transcribeAudio(
       }
     } catch (nativeErr: any) {
       if (nativeErr?.name === 'AbortError') {
-        throw new Error('Transcription timed out. The server may still be waking up. Your audio is saved; please retry.');
+        throw new Error('Transcription timed out. The server may still be waking up. Please retry.');
       }
       console.warn('Native upload failed, attempting fallback fetch:', nativeErr?.message);
     }
@@ -75,7 +88,7 @@ export async function transcribeAudio(
       if (!blobResponse.ok) throw new Error(`recording URL returned ${blobResponse.status}`);
       audioBlob = await blobResponse.blob();
     } catch {
-      throw new Error('Could not read the browser recording. Please record again and try once more.');
+      throw new Error('Could not read the audio recording. Please record again and try once more.');
     }
     const extension = audioBlob.type.includes('ogg')
       ? 'ogg'
@@ -93,7 +106,7 @@ export async function transcribeAudio(
 
   let response: Response;
   const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), 75_000);
+  const timeout = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
   try {
     response = await fetch(`${TRANSCRIPTION_API_URL}/transcribe`, {
       method: 'POST',
@@ -105,12 +118,9 @@ export async function transcribeAudio(
     });
   } catch (error: any) {
     if (error?.name === 'AbortError') {
-      throw new Error('Transcription timed out. The server may still be waking up. Your audio is saved; please retry.');
+      throw new Error('Transcription timed out. The server took too long to wake up. Please retry in a few moments.');
     }
-    const detail = error instanceof Error ? error.message : String(error);
-    throw new Error(
-      `Could not reach the transcription server at ${TRANSCRIPTION_API_URL} (${detail}). Verify the server is running.`
-    );
+    throw error;
   } finally {
     clearTimeout(timeout);
   }
@@ -127,3 +137,33 @@ export async function transcribeAudio(
     text: payload.text.trim(),
   };
 }
+
+export async function transcribeAudio(
+  audioUri: string,
+  options: { noteId: string; filename?: string }
+): Promise<TranscriptionResult> {
+  try {
+    return await performTranscriptionAttempt(audioUri, options);
+  } catch (firstError) {
+    // Automatic 1x retry on cold-start timeouts or network drops
+    const rawMsg = String(firstError);
+    const isRetryable =
+      rawMsg.includes('timed out') ||
+      rawMsg.includes('AbortError') ||
+      rawMsg.includes('network') ||
+      rawMsg.includes('502') ||
+      rawMsg.includes('503');
+
+    if (isRetryable) {
+      console.log('Transcription initial attempt encountered transient error; retrying in 2s…');
+      await new Promise((resolve) => setTimeout(resolve, 2000));
+      try {
+        return await performTranscriptionAttempt(audioUri, options);
+      } catch (secondError) {
+        throw new Error(toFriendlyErrorMessage(secondError, 'Transcription service is currently unavailable. Please retry shortly.'));
+      }
+    }
+    throw new Error(toFriendlyErrorMessage(firstError, 'Transcription failed. Please try again.'));
+  }
+}
+

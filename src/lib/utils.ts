@@ -65,3 +65,76 @@ export function isSupportedAudio(name = '', mimeType = ''): boolean {
     SUPPORTED_AUDIO_EXTENSIONS.includes(ext)
   );
 }
+
+// ─── User-Friendly Error Translation ──────────────────────────────────────────
+/**
+ * Translates low-level Java/Android, network, or server exceptions into
+ * crisp, friendly, actionable English messages.
+ */
+export function toFriendlyErrorMessage(err: unknown, fallbackMessage = 'An unexpected error occurred. Please try again.'): string {
+  if (!err) return fallbackMessage;
+
+  const raw = typeof err === 'string' ? err : err instanceof Error ? err.message : String(err);
+  const lower = raw.toLowerCase();
+
+  // Android DNS / Host resolution errors
+  if (
+    lower.includes('unknownhostexception') ||
+    lower.includes('no address associated with hostname') ||
+    lower.includes('unable to resolve host')
+  ) {
+    return 'Unable to reach the cloud server. Please check your internet connection (Wi-Fi or mobile data) and try again.';
+  }
+
+  // Network offline / connection drops
+  if (
+    lower.includes('network request failed') ||
+    lower.includes('failed to fetch') ||
+    lower.includes('connectexception') ||
+    lower.includes('econnrefused') ||
+    lower.includes('enetunreach')
+  ) {
+    return 'Network connection problem. Please verify you are connected to the internet and retry.';
+  }
+
+  // Timeouts / Server Cold Starts
+  if (
+    lower.includes('sockettimeoutexception') ||
+    lower.includes('timed out') ||
+    lower.includes('timeout') ||
+    lower.includes('aborterror')
+  ) {
+    return 'Connection timed out. The server was taking too long to respond. Please try again in a few seconds.';
+  }
+
+  // SSL / Certificate issues
+  if (lower.includes('sslhandshakeexception') || lower.includes('cert_') || lower.includes('certificate')) {
+    return 'Secure connection could not be established. Please check your device date, time, and network settings.';
+  }
+
+  // Supabase Auth specific
+  if (lower.includes('invalid login credentials') || lower.includes('invalid_grant')) {
+    return 'Incorrect email or password. Please double check and try again.';
+  }
+  if (lower.includes('email not confirmed')) {
+    return 'Your email has not been confirmed yet. Please check your inbox for the confirmation link.';
+  }
+  if (lower.includes('user already registered') || lower.includes('already exists')) {
+    return 'An account with this email already exists. Please sign in instead.';
+  }
+  if (lower.includes('rate limit') || lower.includes('too many requests')) {
+    return 'Too many attempts. Please wait a minute before trying again.';
+  }
+
+  // Cloud / Render Server Wake-up (502 / 503)
+  if (lower.includes('502') || lower.includes('bad gateway') || lower.includes('503') || lower.includes('service unavailable')) {
+    return 'Cloud server is waking up. Please retry in 15–30 seconds.';
+  }
+
+  // Return clean string without raw technical traces
+  if (raw.length > 180 || raw.includes('java.net.') || raw.includes('at android.') || raw.includes('at com.')) {
+    return 'Unable to complete request due to a network connection issue. Please check your connection and retry.';
+  }
+
+  return raw;
+}

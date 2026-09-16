@@ -4,6 +4,7 @@ import { Platform } from 'react-native';
 import * as Linking from 'expo-linking';
 import * as WebBrowser from 'expo-web-browser';
 import { isSupabaseConfigured, supabase } from './supabase';
+import { toFriendlyErrorMessage } from '@/lib/utils';
 
 WebBrowser.maybeCompleteAuthSession();
 
@@ -62,27 +63,35 @@ export function AuthProvider({ children }: PropsWithChildren) {
       configured: isSupabaseConfigured,
       signIn: async (email, password) => {
         if (!supabase) return { error: 'Cloud accounts are not configured yet.' };
-        const { error } = await supabase.auth.signInWithPassword({ email: email.trim(), password });
-        return { error: error?.message ?? null };
+        try {
+          const { error } = await supabase.auth.signInWithPassword({ email: email.trim(), password });
+          return { error: error ? toFriendlyErrorMessage(error.message) : null };
+        } catch (err) {
+          return { error: toFriendlyErrorMessage(err) };
+        }
       },
       signUp: async (email, password) => {
         if (!supabase) return { error: 'Cloud accounts are not configured yet.', needsEmailConfirmation: false };
         const cleanEmail = email.trim();
-        const { data, error } = await supabase.auth.signUp({ email: cleanEmail, password });
-        if (error) {
-          return { error: error.message, needsEmailConfirmation: false };
-        }
-        if (data.user && !data.session) {
-          // Attempt immediate sign in in case project auto-confirms
-          const autoSign = await supabase.auth.signInWithPassword({ email: cleanEmail, password });
-          if (!autoSign.error && autoSign.data.session) {
-            return { error: null, needsEmailConfirmation: false };
+        try {
+          const { data, error } = await supabase.auth.signUp({ email: cleanEmail, password });
+          if (error) {
+            return { error: toFriendlyErrorMessage(error.message), needsEmailConfirmation: false };
           }
+          if (data.user && !data.session) {
+            // Attempt immediate sign in in case project auto-confirms
+            const autoSign = await supabase.auth.signInWithPassword({ email: cleanEmail, password });
+            if (!autoSign.error && autoSign.data.session) {
+              return { error: null, needsEmailConfirmation: false };
+            }
+          }
+          return {
+            error: null,
+            needsEmailConfirmation: Boolean(data.user && !data.session),
+          };
+        } catch (err) {
+          return { error: toFriendlyErrorMessage(err), needsEmailConfirmation: false };
         }
-        return {
-          error: null,
-          needsEmailConfirmation: Boolean(data.user && !data.session),
-        };
       },
       resendConfirmation: async (email: string) => {
         if (!supabase) return { error: 'Cloud accounts are not configured yet.' };
@@ -93,20 +102,22 @@ export function AuthProvider({ children }: PropsWithChildren) {
             type: 'signup',
             email: cleanEmail,
           });
-          return { error: error?.message ?? null };
+          return { error: error ? toFriendlyErrorMessage(error.message) : null };
         } catch (err) {
-          return { error: err instanceof Error ? err.message : 'Could not resend email.' };
+          return { error: toFriendlyErrorMessage(err) };
         }
       },
       signInWithOAuth: async (provider: 'google' | 'apple') => {
         if (!supabase) return { error: 'Cloud accounts are not configured yet.' };
-        try {
+        const client = supabase;
+
+        const runOAuth = async () => {
           const redirectUrl =
             Platform.OS === 'web'
               ? (typeof window !== 'undefined' ? window.location.origin : undefined)
               : Linking.createURL('auth/callback');
 
-          const { data, error } = await supabase.auth.signInWithOAuth({
+          const { data, error } = await client.auth.signInWithOAuth({
             provider,
             options: {
               redirectTo: redirectUrl,
@@ -114,7 +125,7 @@ export function AuthProvider({ children }: PropsWithChildren) {
             },
           });
 
-          if (error) return { error: error.message };
+          if (error) throw error;
 
           if (Platform.OS !== 'web' && data?.url) {
             const result = await WebBrowser.openAuthSessionAsync(data.url, redirectUrl);
@@ -123,20 +134,31 @@ export function AuthProvider({ children }: PropsWithChildren) {
               const code = parsed.queryParams?.code;
               if (typeof code === 'string') {
                 const { data: sessionData, error: exchangeError } =
-                  await supabase.auth.exchangeCodeForSession(code);
-                if (exchangeError) return { error: exchangeError.message };
+                  await client.auth.exchangeCodeForSession(code);
+                if (exchangeError) throw exchangeError;
                 if (sessionData?.session) {
                   setSession(sessionData.session);
                 }
               }
             }
           }
-
           return { error: null };
-        } catch (err) {
-          return {
-            error: err instanceof Error ? err.message : `Could not initiate ${provider} sign in.`,
-          };
+        };
+
+        try {
+          return await runOAuth();
+        } catch (firstErr) {
+          // Automatic 1x retry on transient network/DNS hiccup before giving up
+          const raw = String(firstErr);
+          if (raw.includes('UnknownHostException') || raw.includes('Network request failed') || raw.includes('Failed to fetch')) {
+            await new Promise((r) => setTimeout(r, 1200));
+            try {
+              return await runOAuth();
+            } catch (secondErr) {
+              return { error: toFriendlyErrorMessage(secondErr) };
+            }
+          }
+          return { error: toFriendlyErrorMessage(firstErr) };
         }
       },
       resetPassword: async (email: string) => {
@@ -149,23 +171,30 @@ export function AuthProvider({ children }: PropsWithChildren) {
             ? (typeof window !== 'undefined' ? window.location.origin : undefined)
             : Linking.createURL('auth/reset-password');
 
-        const { error } = await supabase.auth.resetPasswordForEmail(cleanEmail, {
-          redirectTo: redirectUrl,
-        });
-
-        return { error: error?.message ?? null };
+        try {
+          const { error } = await supabase.auth.resetPasswordForEmail(cleanEmail, {
+            redirectTo: redirectUrl,
+          });
+          return { error: error ? toFriendlyErrorMessage(error.message) : null };
+        } catch (err) {
+          return { error: toFriendlyErrorMessage(err) };
+        }
       },
       updateProfile: async (fullName: string) => {
         if (!supabase) return { error: 'Cloud accounts are not configured yet.' };
-        const { data, error } = await supabase.auth.updateUser({
-          data: { full_name: fullName.trim() },
-        });
+        try {
+          const { data, error } = await supabase.auth.updateUser({
+            data: { full_name: fullName.trim() },
+          });
 
-        if (error) return { error: error.message };
-        if (data?.user) {
-          setSession((prev) => (prev ? { ...prev, user: data.user } : prev));
+          if (error) return { error: toFriendlyErrorMessage(error.message) };
+          if (data?.user) {
+            setSession((prev) => (prev ? { ...prev, user: data.user } : prev));
+          }
+          return { error: null };
+        } catch (err) {
+          return { error: toFriendlyErrorMessage(err) };
         }
-        return { error: null };
       },
       deleteAccount: async () => {
         if (!supabase) return { error: null };
@@ -175,21 +204,26 @@ export function AuthProvider({ children }: PropsWithChildren) {
           setSession(null);
           if (rpcError) {
             return {
-              error: `Signed out, but server data deletion encountered an issue: ${rpcError.message}`,
+              error: `Signed out, but server data deletion encountered an issue: ${toFriendlyErrorMessage(rpcError.message)}`,
             };
           }
           return { error: null };
         } catch (err) {
           await supabase.auth.signOut();
           setSession(null);
-          return { error: err instanceof Error ? err.message : 'Could not delete account' };
+          return { error: toFriendlyErrorMessage(err, 'Could not delete account. Please try again.') };
         }
       },
       signOut: async () => {
         if (!supabase) return { error: null };
-        const { error } = await supabase.auth.signOut();
-        setSession(null);
-        return { error: error?.message ?? null };
+        try {
+          const { error } = await supabase.auth.signOut();
+          setSession(null);
+          return { error: error ? toFriendlyErrorMessage(error.message) : null };
+        } catch (err) {
+          setSession(null);
+          return { error: toFriendlyErrorMessage(err) };
+        }
       },
     }),
     [loading, session]

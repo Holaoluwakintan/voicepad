@@ -42,7 +42,17 @@ app.use(cors({
   credentials: true,
 }));
 
-app.get('/health', (_req, res) => res.json({ ok: true, service: 'voicepad-transcription' }));
+app.all(['/health', '/ping'], (_req, res) => res.json({ ok: true, service: 'voicepad-transcription', timestamp: Date.now() }));
+
+// Render Free Tier keep-alive: ping self every 13 minutes if deployed on Render
+const renderExternalUrl = process.env.RENDER_EXTERNAL_URL || (process.env.NODE_ENV === 'production' ? 'https://voicepad-transcription.onrender.com' : null);
+if (renderExternalUrl) {
+  setInterval(async () => {
+    try {
+      await fetch(`${renderExternalUrl}/health`);
+    } catch {}
+  }, 13 * 60_000).unref?.();
+}
 
 const termsSections = [
   { title: '1. Acceptance of Terms', content: 'By downloading, accessing, or using VoicePad, you agree to be legally bound by these Terms of Service.' },
@@ -229,13 +239,15 @@ app.post('/summarize', authMiddleware, rateLimitMiddleware, async (req, res) => 
     return res.status(400).json({ error: 'Transcript text is required.' });
   }
 
-  // Use llama-3.1-8b-instant as primary (available to all Groq tiers, sub-second latency) with fallbacks
+  // Primary active Groq models for executive summaries & takeaways
   const modelsToTry = [
     process.env.GROQ_SUMMARY_MODEL,
+    'openai/gpt-oss-20b',
+    'groq/compound-mini',
+    'qwen/qwen3.8-27b',
+    'openai/gpt-oss-120b',
     'llama-3.1-8b-instant',
     'llama-3.3-70b-versatile',
-    'llama3-8b-8192',
-    'mixtral-8x7b-32768',
   ].filter(Boolean);
 
   console.log(`summary_request chars=${text.length}`);
