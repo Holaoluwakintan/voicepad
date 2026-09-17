@@ -1,0 +1,10 @@
+﻿{
+  "buildCommand": "cd web && pnpm install --frozen-lockfile && pnpm run build",
+  "outputDirectory": "web/dist/public",
+  "rewrites": [
+    {
+      "source": "/(.*)",
+      "destination": "/index.html"
+    }
+  ]
+}
