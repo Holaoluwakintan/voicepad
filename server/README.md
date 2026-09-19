@@ -36,7 +36,9 @@ Optional production variables are:
 GROQ_TRANSLATION_MODEL=whisper-large-v3
 GROQ_TRANSCRIPTION_MODEL=whisper-large-v3-turbo
 MAX_REQUESTS_PER_MINUTE=10
-ALLOWED_ORIGINS=*
+MAX_REQUESTS_PER_USER_PER_MINUTE=20
+ALLOWED_ORIGINS=https://your-web-origin.example
+REQUIRE_AUTH=true
 ```
 
 The service health check is:
@@ -52,6 +54,8 @@ EXPO_PUBLIC_TRANSCRIPTION_API_URL=https://voicepad-transcription.onrender.com
 ```
 
 Never put `GROQ_API_KEY` in the Expo `.env`, source code, ZIP, or mobile build. Keep the key only in the server hosting provider's private environment settings.
+
+Before deploying, apply the versioned SQL migration in `supabase/migrations/`. It creates the account deletion function, processing job records, quota records, and synchronization conflict records. Production AI routes require a valid Supabase bearer token and an `Idempotency-Key` header.
 
 ## Models
 

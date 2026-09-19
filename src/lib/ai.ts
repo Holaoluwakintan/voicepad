@@ -15,6 +15,7 @@ export async function generateAISummary(transcript: string): Promise<SummaryResu
   if (!clean) {
     throw new Error('Transcript text is empty.');
   }
+  const summaryKey = `summary-${clean.length}-${clean.slice(0, 32)}`;
 
   const attempt = async () => {
     const authHeaders = await getAuthHeaders();
@@ -26,6 +27,7 @@ export async function generateAISummary(transcript: string): Promise<SummaryResu
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
+          'Idempotency-Key': summaryKey,
           ...authHeaders,
         },
         body: JSON.stringify({ text: clean }),
@@ -80,6 +82,7 @@ export type OCRResult = {
 export async function transcribeImage(base64Image: string, mimeType = 'image/jpeg'): Promise<OCRResult> {
   const clean = base64Image?.trim();
   if (!clean) throw new Error('Image data is empty.');
+  const ocrKey = `ocr-${clean.length}-${clean.slice(0, 32)}`;
 
   const attempt = async () => {
     const authHeaders = await getAuthHeaders();
@@ -91,6 +94,7 @@ export async function transcribeImage(base64Image: string, mimeType = 'image/jpe
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
+          'Idempotency-Key': ocrKey,
           ...authHeaders,
         },
         body: JSON.stringify({
@@ -133,5 +137,3 @@ export async function transcribeImage(base64Image: string, mimeType = 'image/jpe
     throw new Error(toFriendlyErrorMessage(firstErr, 'Could not read text from image. Please ensure the image is clear and retry.'));
   }
 }
-
-

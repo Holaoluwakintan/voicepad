@@ -1,3 +1,4 @@
+import crypto from 'node:crypto';
 import cors from 'cors';
 import express from 'express';
 import multer from 'multer';
@@ -17,10 +18,14 @@ const upload = multer({
   limits: { fileSize: maxFileSize },
 });
 const groqBaseUrl = process.env.GROQ_BASE_URL ?? 'https://api.groq.com/openai/v1';
-const allowedOrigins = (process.env.ALLOWED_ORIGINS ?? '*').split(',').map((value) => value.trim()).filter(Boolean);
+const allowedOrigins = (process.env.ALLOWED_ORIGINS ?? 'http://localhost:8081,http://localhost:19006').split(',').map((value) => value.trim()).filter(Boolean);
 const requestsByIp = new Map();
+const requestsByUser = new Map();
+const idempotencyResponses = new Map();
 const rateWindowMs = 60_000;
 const maxRequestsPerWindow = Number(process.env.MAX_REQUESTS_PER_MINUTE ?? 10);
+const maxRequestsPerUserPerWindow = Number(process.env.MAX_REQUESTS_PER_USER_PER_MINUTE ?? 20);
+const idempotencyTtlMs = 10 * 60_000;
 
 // Periodically clean up stale IPs to avoid unbounded memory growth
 setInterval(() => {
@@ -33,14 +38,32 @@ setInterval(() => {
       requestsByIp.set(ip, recent);
     }
   }
+  for (const [userId, timestamps] of requestsByUser.entries()) {
+    const recent = timestamps.filter((timestamp) => now - timestamp < rateWindowMs);
+    if (recent.length === 0) requestsByUser.delete(userId);
+    else requestsByUser.set(userId, recent);
+  }
+  for (const [key, entry] of idempotencyResponses.entries()) {
+    if (now - entry.createdAt >= idempotencyTtlMs) idempotencyResponses.delete(key);
+  }
 }, 5 * 60_000).unref?.();
 
 app.use(express.json({ limit: '25mb' }));
 app.use(express.urlencoded({ extended: true, limit: '25mb' }));
 app.use(cors({
-  origin: allowedOrigins.includes('*') ? true : allowedOrigins,
+  origin(origin, callback) {
+    if (!origin || allowedOrigins.includes(origin)) return callback(null, true);
+    return callback(new Error('Origin is not allowed by VoicePad CORS policy'));
+  },
   credentials: true,
 }));
+
+app.use((req, res, next) => {
+  const requestId = req.headers['x-request-id'] || crypto.randomUUID();
+  req.requestId = String(requestId);
+  res.setHeader('x-request-id', req.requestId);
+  next();
+});
 
 app.all(['/health', '/ping'], (_req, res) => res.json({ ok: true, service: 'voicepad-transcription', timestamp: Date.now() }));
 
@@ -120,7 +143,9 @@ app.get('/terms', (_req, res) => res.type('html').send(renderLegalHtml('Terms of
 
 const supabaseUrl = (process.env.SUPABASE_URL ?? process.env.EXPO_PUBLIC_SUPABASE_URL ?? '').trim();
 const supabaseAnonKey = (process.env.SUPABASE_ANON_KEY ?? process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY ?? '').trim();
-const requireAuth = process.env.REQUIRE_AUTH === 'true';
+// Paid AI routes are authenticated by default. Set REQUIRE_AUTH=false only for
+// an explicitly isolated local development server, never in production.
+const requireAuth = process.env.NODE_ENV === 'production' || process.env.REQUIRE_AUTH !== 'false';
 
 async function authMiddleware(req, res, next) {
   const authHeader = req.headers.authorization;
@@ -139,7 +164,7 @@ async function authMiddleware(req, res, next) {
   }
 
   if (requireAuth && !req.user) {
-    return res.status(401).json({ error: 'Authentication required. Please sign in to use AI transcription.' });
+    return res.status(401).json({ error: 'Authentication required. Please sign in to use VoicePad AI.', requestId: req.requestId });
   }
 
   next();
@@ -167,9 +192,37 @@ function isRateLimited(ip) {
 }
 
 function rateLimitMiddleware(req, res, next) {
-  if (isRateLimited(req.ip)) {
-    return res.status(429).json({ error: 'Too many requests. Please wait a minute and try again.' });
+  const identity = req.user?.id;
+  if (identity) {
+    const now = Date.now();
+    const recent = (requestsByUser.get(identity) ?? []).filter((timestamp) => now - timestamp < rateWindowMs);
+    recent.push(now);
+    requestsByUser.set(identity, recent);
+    if (recent.length > maxRequestsPerUserPerWindow) {
+      return res.status(429).json({ error: 'Your VoicePad AI usage limit has been reached. Please try again later.', requestId: req.requestId });
+    }
   }
+  if (isRateLimited(req.ip)) {
+    return res.status(429).json({ error: 'Too many requests. Please wait a minute and try again.', requestId: req.requestId });
+  }
+  next();
+}
+
+function idempotencyMiddleware(req, res, next) {
+  const key = String(req.headers['idempotency-key'] || '').trim();
+  if (!key || key.length > 200) {
+    return res.status(400).json({ error: 'An Idempotency-Key header is required for AI requests.', requestId: req.requestId });
+  }
+  const scopedKey = `${req.user?.id || req.ip}:${req.path}:${key}`;
+  const previous = idempotencyResponses.get(scopedKey);
+  if (previous) return res.status(previous.status).json(previous.body);
+  const originalJson = res.json.bind(res);
+  res.json = (body) => {
+    if (res.statusCode >= 200 && res.statusCode < 300) {
+      idempotencyResponses.set(scopedKey, { createdAt: Date.now(), status: res.statusCode, body });
+    }
+    return originalJson(body);
+  };
   next();
 }
 
@@ -262,7 +315,7 @@ async function callGeminiVision(base64Data, mimeType) {
   return null;
 }
 
-app.post('/transcribe', authMiddleware, rateLimitMiddleware, upload.single('file'), async (req, res) => {
+app.post('/transcribe', authMiddleware, rateLimitMiddleware, idempotencyMiddleware, upload.single('file'), async (req, res) => {
   const groqKeys = [process.env.GROQ_API_KEY, groqApiKeyBackup].filter(Boolean);
   if (groqKeys.length === 0) return res.status(500).json({ error: 'No transcription API key is configured on the server.' });
   if (!req.file) return res.status(400).json({ error: 'Audio file is required.' });
@@ -323,7 +376,7 @@ app.post('/transcribe', authMiddleware, rateLimitMiddleware, upload.single('file
   return res.status(502).json({ error: 'Transcription provider could not process the audio. Please retry.' });
 });
 
-app.post('/summarize', authMiddleware, rateLimitMiddleware, async (req, res) => {
+app.post('/summarize', authMiddleware, rateLimitMiddleware, idempotencyMiddleware, async (req, res) => {
   const text = req.body?.text;
   if (!text || typeof text !== 'string' || !text.trim()) {
     return res.status(400).json({ error: 'Transcript text is required.' });
@@ -407,7 +460,7 @@ app.post('/summarize', authMiddleware, rateLimitMiddleware, async (req, res) => 
 });
 
 // Image-to-Text OCR Vision Endpoint (Groq Qwen Vision + Gemini Vision fallback)
-app.post('/ocr', authMiddleware, rateLimitMiddleware, upload.single('image'), async (req, res) => {
+app.post('/ocr', authMiddleware, rateLimitMiddleware, idempotencyMiddleware, upload.single('image'), async (req, res) => {
   let base64Data = '';
   let mimeType = 'image/jpeg';
 
@@ -516,8 +569,13 @@ app.post('/ocr', authMiddleware, rateLimitMiddleware, upload.single('image'), as
 });
 
 app.use((error, _req, res, _next) => {
+  if (error?.message?.includes('CORS')) return res.status(403).json({ error: 'Origin is not allowed.' });
   if (error?.code === 'LIMIT_FILE_SIZE') return res.status(413).json({ error: 'Audio file is larger than 25 MB.' });
   return res.status(400).json({ error: error?.message || 'Invalid request.' });
 });
 
-app.listen(port, '0.0.0.0', () => console.log(`VoicePad transcription server listening on http://0.0.0.0:${port}`));
+if (process.env.NODE_ENV !== 'test') {
+  app.listen(port, '0.0.0.0', () => console.log(`VoicePad transcription server listening on http://0.0.0.0:${port}`));
+}
+
+export { app };

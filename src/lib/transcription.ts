@@ -28,6 +28,7 @@ async function performTranscriptionAttempt(
 ): Promise<TranscriptionResult> {
   const nativeFilename = options.filename ?? `voicepad-${options.noteId}.m4a`;
   const authHeaders = await getAuthHeaders();
+  const idempotencyKey = `transcribe-${options.noteId}`;
 
   // On Native (Android / iOS), first attempt native File.upload for robust background streaming
   if (Platform.OS !== 'web') {
@@ -48,6 +49,7 @@ async function performTranscriptionAttempt(
           },
           headers: {
             Accept: 'application/json',
+            'Idempotency-Key': idempotencyKey,
             ...authHeaders,
           },
           signal: controller.signal,
@@ -111,6 +113,7 @@ async function performTranscriptionAttempt(
     response = await fetch(`${TRANSCRIPTION_API_URL}/transcribe`, {
       method: 'POST',
       headers: {
+        'Idempotency-Key': idempotencyKey,
         ...authHeaders,
       },
       body: form,
@@ -166,4 +169,3 @@ export async function transcribeAudio(
     throw new Error(toFriendlyErrorMessage(firstError, 'Transcription failed. Please try again.'));
   }
 }
-

@@ -15,14 +15,16 @@ services:
         value: whisper-large-v3-turbo
       - key: MAX_REQUESTS_PER_MINUTE
         value: "10"
+      - key: MAX_REQUESTS_PER_USER_PER_MINUTE
+        value: "20"
       - key: ALLOWED_ORIGINS
-        value: "*"
+        sync: false
       - key: SUPABASE_URL
         sync: false
       - key: SUPABASE_ANON_KEY
         sync: false
       - key: REQUIRE_AUTH
-        value: "false"
+        value: "true"
       - key: GEMINI_API_KEY
         sync: false
       - key: GROQ_API_KEY_BACKUP

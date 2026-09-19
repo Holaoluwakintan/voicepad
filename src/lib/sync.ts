@@ -13,7 +13,8 @@ function toRow(note: Note, userId: string) {
     created_at: note.createdAt,
     updated_at: note.updatedAt || note.createdAt,
     deleted_at: note.deletedAt || null,
-    audio_uri: note.audioUri ?? null,
+    // A device-local URI is not portable and must never be written to cloud metadata.
+    audio_uri: null,
     audio_path: note.audioPath ?? null,
     source: note.source ?? 'voice',
     category: note.category ?? 'Personal',
@@ -34,7 +35,8 @@ function fromRow(row: Record<string, unknown>): Note {
     createdAt: String(row.created_at),
     updatedAt: typeof row.updated_at === 'string' ? row.updated_at : undefined,
     deletedAt: typeof row.deleted_at === 'string' ? row.deleted_at : null,
-    audioUri: typeof row.audio_uri === 'string' ? row.audio_uri : undefined,
+    // Legacy audio_uri values are intentionally ignored. Use audio_path for cloud audio.
+    audioUri: undefined,
     audioPath: typeof row.audio_path === 'string' ? row.audio_path : undefined,
     source: row.source === 'text' ? 'text' : 'voice',
     category: ['Lectures', 'Sermons', 'Meetings', 'Personal'].includes(String(row.category))
@@ -55,10 +57,8 @@ export async function syncNotes(userId: string): Promise<SyncResult> {
   if (!supabase) return { ok: false, message: 'Cloud sync is not configured.' };
 
   try {
-    // 1. Load all local notes (including soft-deleted notes to sync tombstones)
     const localNotes = await loadNotes(true);
 
-    // 2. Background audio upload for any voice notes that have not yet uploaded audio to Supabase Storage
     for (const note of localNotes) {
       if (note.source === 'voice' && note.audioUri && !note.audioPath && !note.deletedAt) {
         try {
@@ -68,76 +68,56 @@ export async function syncNotes(userId: string): Promise<SyncResult> {
             await updateNote(note.id, { audioPath: uploadedPath });
           }
         } catch {
-          // Non-blocking: continue sync even if individual audio upload is retrying
+          // Continue note sync; audio can be retried without exposing its local URI.
         }
       }
     }
 
-    // 3. Upsert local notes to Supabase
     if (localNotes.length > 0) {
       const { error: uploadError } = await supabase
         .from('voicepad_notes')
         .upsert(localNotes.map((note) => toRow(note, userId)), { onConflict: 'id' });
-
       if (uploadError) {
         console.warn('Sync upload error:', uploadError.message);
         return { ok: false, message: uploadError.message };
       }
     }
 
-    // 4. Fetch all remote notes for this user
     const { data: remoteRows, error: fetchError } = await supabase
       .from('voicepad_notes')
       .select('*')
       .eq('user_id', userId)
       .order('created_at', { ascending: false });
-
-    if (fetchError) {
-      return { ok: false, message: fetchError.message };
-    }
+    if (fetchError) return { ok: false, message: fetchError.message };
 
     if (remoteRows) {
       const remoteNotes = remoteRows.map(fromRow);
       const mergedMap = new Map<string, Note>();
+      for (const local of localNotes) mergedMap.set(local.id, local);
 
-      // Populate local notes first
-      for (const local of localNotes) {
-        mergedMap.set(local.id, local);
-      }
-
-      // Merge with remote notes using timestamp conflict resolution
       for (const remote of remoteNotes) {
         const local = mergedMap.get(remote.id);
-
         if (!local) {
-          // New note from another device
           mergedMap.set(remote.id, remote);
-        } else {
-          // Both exist: compare update timestamps
-          const localTime = new Date(local.updatedAt || local.createdAt).getTime();
-          const remoteTime = new Date(remote.updatedAt || remote.createdAt).getTime();
+          continue;
+        }
 
-          if (remoteTime > localTime) {
-            const hasContentConflict =
-              Boolean(local.content?.trim()) &&
-              Boolean(remote.content?.trim()) &&
-              local.content.trim() !== remote.content.trim();
-
-            if (hasContentConflict && !remote.content.includes(local.content.trim())) {
-              // Non-destructive merge: preserve local changes so thoughts are never lost
-              const preservedContent = `${remote.content}\n\n--- [Local edits preserved during sync] ---\n${local.content}`;
-              mergedMap.set(remote.id, {
-                ...remote,
-                content: preservedContent,
-                audioUri: local.audioUri || remote.audioUri,
-              });
-            } else {
-              mergedMap.set(remote.id, {
-                ...remote,
-                audioUri: local.audioUri || remote.audioUri,
-              });
-            }
+        const localTime = new Date(local.updatedAt || local.createdAt).getTime();
+        const remoteTime = new Date(remote.updatedAt || remote.createdAt).getTime();
+        if (remoteTime > localTime) {
+          const hasContentConflict = Boolean(local.content?.trim()) && Boolean(remote.content?.trim()) && local.content.trim() !== remote.content.trim();
+          // Record the conflict instead of injecting a confusing marker into the note body.
+          if (hasContentConflict && !remote.content.includes(local.content.trim())) {
+            await supabase.from('voicepad_sync_conflicts').insert({
+              user_id: userId,
+              note_id: remote.id,
+              local_payload: local,
+              remote_payload: remote,
+            });
           }
+          // The remote revision wins deterministically until the conflict UI resolves it.
+          // Preserve the local device URI only; the cloud path remains portable.
+          mergedMap.set(remote.id, { ...remote, audioUri: local.audioUri });
         }
       }
 
@@ -150,3 +130,5 @@ export async function syncNotes(userId: string): Promise<SyncResult> {
     return { ok: false, message: 'Cloud sync is temporarily unavailable. Your local notes are safe.' };
   }
 }
+
+export { toRow, fromRow };

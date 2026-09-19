@@ -200,17 +200,15 @@ export function AuthProvider({ children }: PropsWithChildren) {
         if (!supabase) return { error: null };
         try {
           const { error: rpcError } = await supabase.rpc('delete_user_account');
-          await supabase.auth.signOut();
-          setSession(null);
           if (rpcError) {
             return {
-              error: `Signed out, but server data deletion encountered an issue: ${toFriendlyErrorMessage(rpcError.message)}`,
+              error: `Server data deletion failed. You remain signed in so you can retry safely: ${toFriendlyErrorMessage(rpcError.message)}`,
             };
           }
-          return { error: null };
-        } catch (err) {
           await supabase.auth.signOut();
           setSession(null);
+          return { error: null };
+        } catch (err) {
           return { error: toFriendlyErrorMessage(err, 'Could not delete account. Please try again.') };
         }
       },
