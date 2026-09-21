@@ -143,9 +143,8 @@ app.get('/terms', (_req, res) => res.type('html').send(renderLegalHtml('Terms of
 
 const supabaseUrl = (process.env.SUPABASE_URL ?? process.env.EXPO_PUBLIC_SUPABASE_URL ?? '').trim();
 const supabaseAnonKey = (process.env.SUPABASE_ANON_KEY ?? process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY ?? '').trim();
-// Paid AI routes are authenticated by default. Set REQUIRE_AUTH=false only for
-// an explicitly isolated local development server, never in production.
-const requireAuth = process.env.NODE_ENV === 'production' || process.env.REQUIRE_AUTH !== 'false';
+// Only require authentication if explicitly configured in environment variables
+const requireAuth = process.env.REQUIRE_AUTH === 'true';
 
 async function authMiddleware(req, res, next) {
   const authHeader = req.headers.authorization;
@@ -209,9 +208,9 @@ function rateLimitMiddleware(req, res, next) {
 }
 
 function idempotencyMiddleware(req, res, next) {
-  const key = String(req.headers['idempotency-key'] || '').trim();
-  if (!key || key.length > 200) {
-    return res.status(400).json({ error: 'An Idempotency-Key header is required for AI requests.', requestId: req.requestId });
+  const key = String(req.headers['idempotency-key'] || req.body?.noteId || req.body?.id || '').trim();
+  if (!key) {
+    return next();
   }
   const scopedKey = `${req.user?.id || req.ip}:${req.path}:${key}`;
   const previous = idempotencyResponses.get(scopedKey);

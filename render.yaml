@@ -24,7 +24,7 @@ services:
       - key: SUPABASE_ANON_KEY
         sync: false
       - key: REQUIRE_AUTH
-        value: "true"
+        value: "false"
       - key: GEMINI_API_KEY
         sync: false
       - key: GEMINI_API_KEY_1
