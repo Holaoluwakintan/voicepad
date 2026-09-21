@@ -1,4 +1,5 @@
-import { File, UploadType } from 'expo-file-system';
+import * as FileSystem from 'expo-file-system';
+import { FileSystemUploadType } from 'expo-file-system/legacy';
 import { Platform } from 'react-native';
 
 import { TRANSCRIPTION_API_URL, toFriendlyErrorMessage } from '@/lib/utils';
@@ -30,17 +31,15 @@ async function performTranscriptionAttempt(
   const authHeaders = await getAuthHeaders();
   const idempotencyKey = `transcribe-${options.noteId}`;
 
-  // On Native (Android / iOS), first attempt native File.upload for robust background streaming
+  // 1. On Native (Android / iOS), first attempt FileSystem.uploadAsync (native Multipart upload)
   if (Platform.OS !== 'web') {
     try {
-      const file = new File(audioUri);
-      const controller = new AbortController();
-      const timeout = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
-
-      try {
-        const uploadResult = await file.upload(`${TRANSCRIPTION_API_URL}/transcribe`, {
+      const uploadResult = await FileSystem.uploadAsync(
+        `${TRANSCRIPTION_API_URL}/transcribe`,
+        audioUri,
+        {
           httpMethod: 'POST',
-          uploadType: UploadType.MULTIPART,
+          uploadType: FileSystemUploadType.MULTIPART,
           fieldName: 'file',
           mimeType: 'audio/m4a',
           parameters: {
@@ -52,65 +51,99 @@ async function performTranscriptionAttempt(
             'Idempotency-Key': idempotencyKey,
             ...authHeaders,
           },
+        }
+      );
+
+      const status = uploadResult.status;
+      let payload: any = null;
+      try {
+        payload = JSON.parse(uploadResult.body);
+      } catch {}
+
+      if (status >= 200 && status < 300 && payload?.text && typeof payload.text === 'string') {
+        return { text: payload.text.trim() };
+      }
+      if (status < 200 || status >= 300) {
+        throw new Error(payload?.error ?? `Server error (${status})`);
+      }
+    } catch (nativeErr: any) {
+      if (nativeErr?.message?.includes('timed out') || nativeErr?.name === 'AbortError') {
+        throw new Error('Transcription timed out. The server may still be waking up. Please retry.');
+      }
+      console.warn('Native multipart upload failed, falling back to base64 JSON payload:', nativeErr?.message);
+    }
+
+    // 2. Native Fallback: Read audio file directly as base64 and send standard JSON fetch
+    // (100% immune to Android OkHttp FormDataPart and multipart bridge bugs)
+    try {
+      const base64Audio = await FileSystem.readAsStringAsync(audioUri, {
+        encoding: FileSystem.EncodingType.Base64,
+      });
+
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
+      try {
+        const jsonResponse = await fetch(`${TRANSCRIPTION_API_URL}/transcribe`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Accept: 'application/json',
+            'Idempotency-Key': idempotencyKey,
+            ...authHeaders,
+          },
+          body: JSON.stringify({
+            audio: base64Audio,
+            filename: nativeFilename,
+            mimeType: 'audio/m4a',
+            noteId: options.noteId,
+          }),
           signal: controller.signal,
         });
 
-        const status = uploadResult.status;
-        let payload: any = null;
-        try {
-          payload = JSON.parse(uploadResult.body);
-        } catch {}
-
-        if (status >= 200 && status < 300 && payload?.text && typeof payload.text === 'string') {
-          return { text: payload.text.trim() };
+        const jsonPayload = await jsonResponse.json().catch(() => null);
+        if (jsonResponse.ok && jsonPayload?.text && typeof jsonPayload.text === 'string') {
+          return { text: jsonPayload.text.trim() };
         }
-        if (status < 200 || status >= 300) {
-          throw new Error(payload?.error ?? `Server error (${status})`);
+        if (!jsonResponse.ok) {
+          throw new Error(jsonPayload?.error ?? `Transcription failed (${jsonResponse.status})`);
         }
       } finally {
         clearTimeout(timeout);
       }
-    } catch (nativeErr: any) {
-      if (nativeErr?.name === 'AbortError') {
+    } catch (jsonErr: any) {
+      if (jsonErr?.name === 'AbortError') {
         throw new Error('Transcription timed out. The server may still be waking up. Please retry.');
       }
-      console.warn('Native upload failed, attempting fallback fetch:', nativeErr?.message);
+      console.warn('Native base64 JSON payload failed:', jsonErr?.message);
+      throw jsonErr;
     }
   }
 
-  // Web or fallback fetch path
+  // 3. Web path: fetch Blob and send FormData
+  let audioBlob: Blob;
+  try {
+    const blobResponse = await fetch(audioUri);
+    if (!blobResponse.ok) throw new Error(`recording URL returned ${blobResponse.status}`);
+    audioBlob = await blobResponse.blob();
+  } catch {
+    throw new Error('Could not read the audio recording. Please record again and try once more.');
+  }
+
+  const extension = audioBlob.type.includes('ogg')
+    ? 'ogg'
+    : audioBlob.type.includes('mp4')
+    ? 'm4a'
+    : 'webm';
+
   const form = new FormData();
   form.append('noteId', options.noteId);
   form.append('mode', 'english');
+  form.append('file', audioBlob, `voicepad-${options.noteId}.${extension}`);
 
-  if (Platform.OS === 'web') {
-    let audioBlob: Blob;
-    try {
-      const blobResponse = await fetch(audioUri);
-      if (!blobResponse.ok) throw new Error(`recording URL returned ${blobResponse.status}`);
-      audioBlob = await blobResponse.blob();
-    } catch {
-      throw new Error('Could not read the audio recording. Please record again and try once more.');
-    }
-    const extension = audioBlob.type.includes('ogg')
-      ? 'ogg'
-      : audioBlob.type.includes('mp4')
-      ? 'm4a'
-      : 'webm';
-    form.append('file', audioBlob, `voicepad-${options.noteId}.${extension}`);
-  } else {
-    form.append('file', {
-      uri: audioUri,
-      name: nativeFilename,
-      type: 'audio/m4a',
-    } as unknown as Blob);
-  }
-
-  let response: Response;
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
   try {
-    response = await fetch(`${TRANSCRIPTION_API_URL}/transcribe`, {
+    const response = await fetch(`${TRANSCRIPTION_API_URL}/transcribe`, {
       method: 'POST',
       headers: {
         'Idempotency-Key': idempotencyKey,
@@ -119,26 +152,18 @@ async function performTranscriptionAttempt(
       body: form,
       signal: controller.signal,
     });
-  } catch (error: any) {
-    if (error?.name === 'AbortError') {
-      throw new Error('Transcription timed out. The server took too long to wake up. Please retry in a few moments.');
+
+    const payload = await response.json().catch(() => null);
+    if (!response.ok) {
+      throw new Error(payload?.error ?? `Transcription failed (${response.status})`);
     }
-    throw error;
+    if (!payload?.text || typeof payload.text === 'string') {
+      return { text: (payload?.text || '').trim() };
+    }
+    throw new Error('Server returned an empty transcript.');
   } finally {
     clearTimeout(timeout);
   }
-
-  const payload = await response.json().catch(() => null);
-  if (!response.ok) {
-    throw new Error(payload?.error ?? `Transcription failed (${response.status})`);
-  }
-  if (!payload?.text || typeof payload.text !== 'string') {
-    throw new Error('Server returned an empty transcript.');
-  }
-
-  return {
-    text: payload.text.trim(),
-  };
 }
 
 export async function transcribeAudio(

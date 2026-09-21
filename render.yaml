@@ -27,5 +27,31 @@ services:
         value: "true"
       - key: GEMINI_API_KEY
         sync: false
+      - key: GEMINI_API_KEY_1
+        sync: false
+      - key: GEMINI_API_KEY_2
+        sync: false
+      - key: GEMINI_API_KEY_3
+        sync: false
+      - key: GEMINI_API_KEYS
+        sync: false
       - key: GROQ_API_KEY_BACKUP
+        sync: false
+      - key: GROQ_API_KEY_1
+        sync: false
+      - key: GROQ_API_KEY_2
+        sync: false
+      - key: GROQ_API_KEY_3
+        sync: false
+      - key: GROQ_API_KEYS
+        sync: false
+      - key: DEEPGRAM_API_KEY
+        sync: false
+      - key: DEEPGRAM_API_KEY_1
+        sync: false
+      - key: DEEPGRAM_API_KEY_2
+        sync: false
+      - key: DEEPGRAM_API_KEY_3
+        sync: false
+      - key: DEEPGRAM_API_KEYS
         sync: false

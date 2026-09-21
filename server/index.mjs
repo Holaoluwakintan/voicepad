@@ -226,120 +226,219 @@ function idempotencyMiddleware(req, res, next) {
   next();
 }
 
-const geminiApiKey = (process.env.GEMINI_API_KEY || '').trim();
-const groqApiKeyBackup = (process.env.GROQ_API_KEY_BACKUP || '').trim();
+function getApiKeyList(...sources) {
+  const list = [];
+  for (const src of sources) {
+    if (!src) continue;
+    const parts = String(src).split(',').map((k) => k.trim()).filter(Boolean);
+    list.push(...parts);
+  }
+  return Array.from(new Set(list));
+}
 
-async function callGeminiSummary(text) {
-  if (!geminiApiKey) return null;
-  const geminiModels = ['gemini-3.6-flash', 'gemini-3.7-flash', 'gemini-flash-latest', 'gemini-2.5-flash-lite'];
-  for (const model of geminiModels) {
+const groqKeys = getApiKeyList(
+  process.env.GROQ_API_KEY,
+  process.env.GROK_API_KEY,
+  process.env.GROQ_API_KEY_1,
+  process.env.GROK_API_KEY_1,
+  process.env.GROQ_API_KEY_2,
+  process.env.GROK_API_KEY_2,
+  process.env.GROQ_API_KEY_3,
+  process.env.GROK_API_KEY_3,
+  process.env.GROQ_API_KEY_BACKUP,
+  process.env.GROQ_API_KEYS,
+  process.env.GROK_API_KEYS
+);
+
+const geminiKeys = getApiKeyList(
+  process.env.GEMINI_API_KEY,
+  process.env.GEMINI_API_KEY_1,
+  process.env.GEMINI_API_KEY_2,
+  process.env.GEMINI_API_KEY_3,
+  process.env.GEMINI_API_KEY_BACKUP,
+  process.env.GEMINI_API_KEYS
+);
+
+const deepgramKeys = getApiKeyList(
+  process.env.DEEPGRAM_API_KEY,
+  process.env.DEEPGRAM_API_KEY_1,
+  process.env.DEEPGRAM_API_KEY_2,
+  process.env.DEEPGRAM_API_KEY_3,
+  process.env.DEEPGRAM_API_KEYS
+);
+
+async function callDeepgramTranscription(audioBuffer, mimeType) {
+  if (deepgramKeys.length === 0 || !audioBuffer || audioBuffer.length === 0) return null;
+  for (const apiKey of deepgramKeys) {
     try {
-      const resp = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${geminiApiKey}`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          contents: [{
-            parts: [{
-              text:
-                'You are VoicePad AI, an expert executive assistant and note-taker. Provide a crisp, structured breakdown of the user transcript. Follow this exact format:\n\n' +
-                '### 📌 Executive Summary\n2-3 concise sentences summarizing the core message.\n\n' +
-                '### 🔑 Key Takeaways\n- Bullet points of the primary ideas and insights discussed.\n\n' +
-                '### ⚡ Action Items & Next Steps\n- [ ] Concrete tasks, decisions, or follow-ups mentioned (or "None mentioned" if none).\n\n' +
-                `Transcript: ${text.slice(0, 40000)}`,
-            }],
-          }],
-          generationConfig: { temperature: 0.2 },
-        }),
-      });
-      if (!resp.ok) {
-        console.warn(`gemini_summary_failed model=${model} status=${resp.status}`);
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), 60_000);
+      let response;
+      try {
+        response = await fetch('https://api.deepgram.com/v1/listen?model=nova-2&smart_format=true&punctuate=true', {
+          method: 'POST',
+          headers: {
+            Authorization: `Token ${apiKey}`,
+            'Content-Type': mimeType || 'audio/m4a',
+          },
+          body: audioBuffer,
+          signal: controller.signal,
+        });
+      } finally {
+        clearTimeout(timeout);
+      }
+
+      if (!response.ok) {
+        console.warn(`deepgram_failed status=${response.status}`);
         continue;
       }
-      const data = await resp.json().catch(() => null);
-      const content = data?.candidates?.[0]?.content?.parts?.map((p) => p.text).filter(Boolean).join('');
-      if (content && content.trim()) {
-        console.log(`gemini_summary_succeeded model=${model}`);
-        return { summary: content.trim(), model: `gemini/${model}` };
+      const data = await response.json().catch(() => null);
+      const transcript = data?.results?.channels?.[0]?.alternatives?.[0]?.transcript;
+      if (transcript && typeof transcript === 'string' && transcript.trim()) {
+        console.log('deepgram_transcription_succeeded');
+        return { text: transcript.trim(), model: 'deepgram/nova-2' };
       }
     } catch (err) {
-      console.warn(`gemini_summary_err model=${model}`, err instanceof Error ? err.message : err);
+      console.warn('deepgram_err', err instanceof Error ? err.message : err);
+    }
+  }
+  return null;
+}
+
+async function callGeminiSummary(text) {
+  if (geminiKeys.length === 0) return null;
+  const geminiModels = ['gemini-3.6-flash', 'gemini-3.7-flash', 'gemini-flash-latest', 'gemini-2.5-flash-lite'];
+  for (const apiKey of geminiKeys) {
+    for (const model of geminiModels) {
+      try {
+        const resp = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            contents: [{
+              parts: [{
+                text:
+                  'You are VoicePad AI, an expert executive assistant and note-taker. Provide a crisp, structured breakdown of the user transcript. Follow this exact format:\n\n' +
+                  '### 📌 Executive Summary\n2-3 concise sentences summarizing the core message.\n\n' +
+                  '### 🔑 Key Takeaways\n- Bullet points of the primary ideas and insights discussed.\n\n' +
+                  '### ⚡ Action Items & Next Steps\n- [ ] Concrete tasks, decisions, or follow-ups mentioned (or "None mentioned" if none).\n\n' +
+                  `Transcript: ${text.slice(0, 40000)}`,
+              }],
+            }],
+            generationConfig: { temperature: 0.2 },
+          }),
+        });
+        if (!resp.ok) {
+          console.warn(`gemini_summary_failed model=${model} status=${resp.status}`);
+          continue;
+        }
+        const data = await resp.json().catch(() => null);
+        const content = data?.candidates?.[0]?.content?.parts?.map((p) => p.text).filter(Boolean).join('');
+        if (content && content.trim()) {
+          console.log(`gemini_summary_succeeded model=${model}`);
+          return { summary: content.trim(), model: `gemini/${model}` };
+        }
+      } catch (err) {
+        console.warn(`gemini_summary_err model=${model}`, err instanceof Error ? err.message : err);
+      }
     }
   }
   return null;
 }
 
 async function callGeminiVision(base64Data, mimeType) {
-  if (!geminiApiKey) return null;
+  if (geminiKeys.length === 0) return null;
   const geminiVisionModels = ['gemini-3.6-flash', 'gemini-3.7-flash', 'gemini-flash-latest'];
-  for (const model of geminiVisionModels) {
-    try {
-      const resp = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${geminiApiKey}`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          contents: [{
-            parts: [
-              {
-                text: 'Extract and transcribe all text from this image accurately (whiteboard, document, handwritten notes, lecture slides, or textbook). Format cleanly with headings and bullet points where helpful. Output ONLY the transcribed content without any extra intro or conversational commentary.',
-              },
-              {
-                inlineData: {
-                  mimeType: mimeType || 'image/jpeg',
-                  data: base64Data,
+  for (const apiKey of geminiKeys) {
+    for (const model of geminiVisionModels) {
+      try {
+        const resp = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            contents: [{
+              parts: [
+                {
+                  text: 'Extract and transcribe all text from this image accurately (whiteboard, document, handwritten notes, lecture slides, or textbook). Format cleanly with headings and bullet points where helpful. Output ONLY the transcribed content without any extra intro or conversational commentary.',
                 },
-              },
-            ],
-          }],
-          generationConfig: { temperature: 0.1 },
-        }),
-      });
-      if (!resp.ok) {
-        console.warn(`gemini_vision_failed model=${model} status=${resp.status}`);
-        continue;
+                {
+                  inlineData: {
+                    mimeType: mimeType || 'image/jpeg',
+                    data: base64Data,
+                  },
+                },
+              ],
+            }],
+            generationConfig: { temperature: 0.1 },
+          }),
+        });
+        if (!resp.ok) {
+          console.warn(`gemini_vision_failed model=${model} status=${resp.status}`);
+          continue;
+        }
+        const data = await resp.json().catch(() => null);
+        const text = data?.candidates?.[0]?.content?.parts?.map((p) => p.text).filter(Boolean).join('');
+        if (text && text.trim()) {
+          const firstLine = text.split('\n')[0].replace(/^[#*\s-]+/, '').trim().slice(0, 50);
+          console.log(`gemini_vision_succeeded model=${model}`);
+          return {
+            text: text.trim(),
+            title: firstLine || 'Photo Note',
+            model: `gemini/${model}`,
+          };
+        }
+      } catch (err) {
+        console.warn(`gemini_vision_err model=${model}`, err instanceof Error ? err.message : err);
       }
-      const data = await resp.json().catch(() => null);
-      const text = data?.candidates?.[0]?.content?.parts?.map((p) => p.text).filter(Boolean).join('');
-      if (text && text.trim()) {
-        const firstLine = text.split('\n')[0].replace(/^[#*\s-]+/, '').trim().slice(0, 50);
-        console.log(`gemini_vision_succeeded model=${model}`);
-        return {
-          text: text.trim(),
-          title: firstLine || 'Photo Note',
-          model: `gemini/${model}`,
-        };
-      }
-    } catch (err) {
-      console.warn(`gemini_vision_err model=${model}`, err instanceof Error ? err.message : err);
     }
   }
   return null;
 }
 
 app.post('/transcribe', authMiddleware, rateLimitMiddleware, idempotencyMiddleware, upload.single('file'), async (req, res) => {
-  const groqKeys = [process.env.GROQ_API_KEY, groqApiKeyBackup].filter(Boolean);
-  if (groqKeys.length === 0) return res.status(500).json({ error: 'No transcription API key is configured on the server.' });
-  if (!req.file) return res.status(400).json({ error: 'Audio file is required.' });
-  const isAudio =
-    req.file.mimetype.startsWith('audio/') ||
-    req.file.mimetype.startsWith('video/') ||
-    req.file.mimetype === 'application/octet-stream' ||
-    /\.(m4a|mp4|webm|ogg|wav|mp3|aac)$/i.test(req.file.originalname || '');
-  if (!isAudio) return res.status(400).json({ error: 'Unsupported audio format.' });
+  let audioBuffer = null;
+  let audioMimeType = 'audio/m4a';
+  let originalFilename = 'voice-note.m4a';
 
-  // Default to whisper-large-v3-turbo on transcriptions for blazing-fast transcription speed
+  if (req.file) {
+    audioBuffer = req.file.buffer;
+    audioMimeType = req.file.mimetype || 'audio/m4a';
+    originalFilename = req.file.originalname || 'voice-note.m4a';
+  } else if (req.body?.audio) {
+    const raw = String(req.body.audio);
+    let base64 = raw;
+    if (raw.startsWith('data:')) {
+      const match = raw.match(/^data:([^;]+);base64,(.+)$/);
+      if (match) {
+        audioMimeType = match[1];
+        base64 = match[2];
+      }
+    }
+    try {
+      audioBuffer = Buffer.from(base64, 'base64');
+    } catch {}
+    originalFilename = req.body.filename || 'voice-note.m4a';
+    if (req.body.mimeType) audioMimeType = req.body.mimeType;
+  }
+
+  if (!audioBuffer || audioBuffer.length === 0) {
+    return res.status(400).json({ error: 'Audio file or base64 data is required.' });
+  }
+
+  // 1. Primary: Groq Whisper models across all configured Groq keys
   const models = [
     process.env.GROQ_TRANSCRIPTION_MODEL,
     'whisper-large-v3-turbo',
     'whisper-large-v3',
   ].filter(Boolean);
 
-  console.log(`transcription_request file=${req.file.originalname || 'unknown'} bytes=${req.file.size}`);
+  console.log(`transcription_request file=${originalFilename} bytes=${audioBuffer.length} groqKeys=${groqKeys.length} deepgramKeys=${deepgramKeys.length}`);
 
   for (const apiKey of groqKeys) {
     for (const model of models) {
       try {
         const form = new FormData();
-        form.append('file', new Blob([req.file.buffer], { type: req.file.mimetype || 'audio/mp4' }), req.file.originalname || 'voice-note.m4a');
+        form.append('file', new Blob([audioBuffer], { type: audioMimeType || 'audio/mp4' }), originalFilename);
         form.append('model', model);
         form.append('response_format', 'json');
         form.append('temperature', '0');
@@ -373,7 +472,14 @@ app.post('/transcribe', authMiddleware, rateLimitMiddleware, idempotencyMiddlewa
     }
   }
 
-  return res.status(502).json({ error: 'Transcription provider could not process the audio. Please retry.' });
+  // 2. Cascading Fallback: Deepgram Nova-2 speech-to-text
+  console.log('transcribe: Groq keys exhausted or failed, attempting Deepgram fallback');
+  const deepgramResult = await callDeepgramTranscription(audioBuffer, audioMimeType);
+  if (deepgramResult) {
+    return res.json(deepgramResult);
+  }
+
+  return res.status(502).json({ error: 'Transcription provider could not process the audio. All providers exhausted. Please retry.' });
 });
 
 app.post('/summarize', authMiddleware, rateLimitMiddleware, idempotencyMiddleware, async (req, res) => {
@@ -382,20 +488,20 @@ app.post('/summarize', authMiddleware, rateLimitMiddleware, idempotencyMiddlewar
     return res.status(400).json({ error: 'Transcript text is required.' });
   }
 
-  console.log(`summary_request chars=${text.length}`);
+  console.log(`summary_request chars=${text.length} groqKeys=${groqKeys.length} geminiKeys=${geminiKeys.length}`);
 
-  // 1. Primary: Groq LLM models
-  if (process.env.GROQ_API_KEY) {
-    const modelsToTry = [
-      process.env.GROQ_SUMMARY_MODEL,
-      'openai/gpt-oss-20b',
-      'groq/compound-mini',
-      'qwen/qwen3.8-27b',
-      'openai/gpt-oss-120b',
-      'llama-3.1-8b-instant',
-      'llama-3.3-70b-versatile',
-    ].filter(Boolean);
+  // 1. Primary: Groq LLM models across all Groq keys
+  const modelsToTry = [
+    process.env.GROQ_SUMMARY_MODEL,
+    'openai/gpt-oss-20b',
+    'groq/compound-mini',
+    'qwen/qwen3.8-27b',
+    'openai/gpt-oss-120b',
+    'llama-3.1-8b-instant',
+    'llama-3.3-70b-versatile',
+  ].filter(Boolean);
 
+  for (const apiKey of groqKeys) {
     for (const model of modelsToTry) {
       try {
         const controller = new AbortController();
@@ -405,7 +511,7 @@ app.post('/summarize', authMiddleware, rateLimitMiddleware, idempotencyMiddlewar
           response = await fetch(`${groqBaseUrl}/chat/completions`, {
             method: 'POST',
             headers: {
-              Authorization: `Bearer ${process.env.GROQ_API_KEY}`,
+              Authorization: `Bearer ${apiKey}`,
               'Content-Type': 'application/json',
             },
             body: JSON.stringify({
@@ -487,13 +593,13 @@ app.post('/ocr', authMiddleware, rateLimitMiddleware, idempotencyMiddleware, upl
   let lastErrorMessage = '';
 
   // 1. Primary: Groq Vision models
-  if (process.env.GROQ_API_KEY) {
-    const visionModels = [
-      process.env.GROQ_VISION_MODEL,
-      'qwen/qwen3.8-27b',
-      'qwen/qwen3.6-27b',
-    ].filter(Boolean);
+  const visionModels = [
+    process.env.GROQ_VISION_MODEL,
+    'qwen/qwen3.8-27b',
+    'qwen/qwen3.6-27b',
+  ].filter(Boolean);
 
+  for (const apiKey of groqKeys) {
     for (const model of visionModels) {
       try {
         const controller = new AbortController();
@@ -503,7 +609,7 @@ app.post('/ocr', authMiddleware, rateLimitMiddleware, idempotencyMiddleware, upl
           response = await fetch(`${groqBaseUrl}/chat/completions`, {
             method: 'POST',
             headers: {
-              Authorization: `Bearer ${process.env.GROQ_API_KEY}`,
+              Authorization: `Bearer ${apiKey}`,
               'Content-Type': 'application/json',
             },
             body: JSON.stringify({
