@@ -38,7 +38,9 @@ GROQ_TRANSCRIPTION_MODEL=whisper-large-v3-turbo
 MAX_REQUESTS_PER_MINUTE=10
 MAX_REQUESTS_PER_USER_PER_MINUTE=20
 ALLOWED_ORIGINS=https://your-web-origin.example
-REQUIRE_AUTH=true
+# REQUIRE_AUTH=false lets signed-out (guest) users transcribe. Set it to "true" only if
+# every user of your app is required to sign in first, otherwise guests get a 401.
+REQUIRE_AUTH=false
 ```
 
 The service health check is:

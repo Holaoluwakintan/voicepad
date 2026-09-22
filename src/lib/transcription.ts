@@ -157,8 +157,8 @@ async function performTranscriptionAttempt(
     if (!response.ok) {
       throw new Error(payload?.error ?? `Transcription failed (${response.status})`);
     }
-    if (!payload?.text || typeof payload.text === 'string') {
-      return { text: (payload?.text || '').trim() };
+    if (payload?.text && typeof payload.text === 'string') {
+      return { text: payload.text.trim() };
     }
     throw new Error('Server returned an empty transcript.');
   } finally {

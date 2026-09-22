@@ -18,7 +18,7 @@ const notes = [
 const faqs = [
   ["Does VoicePad work on my phone?", "Yes. VoicePad is designed to move with you across the devices you already use. Capture on mobile, then pick up your organized notes on the web."],
   ["What happens to my audio?", "Your recording is sent securely to VoicePad’s transcription service when you choose to transcribe it. We do not expose provider keys in the browser."],
-  ["Can I upload an existing recording?", "Yes. Upload MP3, M4A, WAV, OGG, WEBM, AAC, or FLAC files up to 25MB and VoicePad will turn them into text."],
+  ["Can I upload an existing recording?", "Yes. Upload MP3, M4A, WAV, OGG, WEBM, AAC, or FLAC files up to 100MB and VoicePad will turn them into text."],
   ["Is VoicePad free right now?", "Yes. Voice transcription is currently free while we are in beta. Paid plans will be introduced later with higher limits and advanced AI features."],
 ];
 
@@ -109,7 +109,7 @@ export default function Home() {
     if (!text.trim()) return;
     setSummaryBusy(true); setError("");
     try {
-      const response = await fetch(`${API_URL}/summarize`, { method: "POST", headers: { "Content-Type": "application/json", ...await getAuthHeaders() }, body: JSON.stringify({ text }) });
+      const response = await fetch(`${API_URL}/summarize`, { method: "POST", headers: { "Content-Type": "application/json", "Idempotency-Key": `summarize-${selectedNote?.id ?? Date.now()}`, ...await getAuthHeaders() }, body: JSON.stringify({ text }) });
       const payload = await response.json().catch(() => null);
       if (!response.ok) throw new Error(payload?.error || "AI summary could not be generated.");
       const nextSummary = payload?.summary?.trim();
@@ -138,7 +138,7 @@ export default function Home() {
     form.append("file", blob, filename);
     form.append("mode", "english");
     try {
-      const response = await fetch(`${API_URL}/transcribe`, { method: "POST", headers: await getAuthHeaders(), body: form });
+      const response = await fetch(`${API_URL}/transcribe`, { method: "POST", headers: { "Idempotency-Key": `transcribe-${filename}-${Date.now()}`, ...await getAuthHeaders() }, body: form });
       const payload = await response.json().catch(() => null);
       if (!response.ok) throw new Error(payload?.error || `Transcription failed (${response.status})`);
       if (!payload?.text) throw new Error("The service returned an empty transcript.");
@@ -175,7 +175,7 @@ export default function Home() {
   const handleUpload = (event: ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
     if (!file) return;
-    if (file.size > 25 * 1024 * 1024) { setStatus("error"); setError("That file is larger than 25MB. Choose a shorter recording and try again."); return; }
+    if (file.size > 100 * 1024 * 1024) { setStatus("error"); setError("That file is larger than 100MB. Choose a shorter recording and try again."); return; }
     if (audioUrl.current) URL.revokeObjectURL(audioUrl.current);
     audioUrl.current = URL.createObjectURL(file);
     if (audioPlayer.current) audioPlayer.current.src = audioUrl.current;

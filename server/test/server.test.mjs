@@ -37,3 +37,13 @@ test('configured browser origins are accepted', async () => {
   assert.equal(response.status, 200);
   assert.equal(response.headers['access-control-allow-origin'], 'https://app.voicepad.test');
 });
+
+test('a transcribe request without an Idempotency-Key is no longer hard-rejected', async () => {
+  // This process runs with REQUIRE_AUTH=true (see the npm test script), so we still expect
+  // a 401 for the missing bearer token, NOT a 400 for a missing Idempotency-Key header.
+  // That distinction is what this regression guards: a missing key should never itself be
+  // a blocking error, since the standalone web client does not always send one.
+  const response = await request(app).post('/transcribe').send();
+  assert.equal(response.status, 401);
+  assert.match(response.body.error, /Authentication required/i);
+});

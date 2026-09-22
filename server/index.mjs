@@ -12,7 +12,11 @@ const app = express();
 app.set('trust proxy', 1);
 
 const port = Number(process.env.PORT ?? 8787);
-const maxFileSize = 25 * 1024 * 1024;
+// Groq's Whisper endpoint hard-caps uploads at 25MB (their limit, not ours), but Deepgram
+// happily accepts much larger files. So the server itself accepts bigger recordings and
+// decides per-request which provider to use, instead of rejecting long recordings outright.
+const maxFileSize = 100 * 1024 * 1024; // 100MB ceiling for a single recording
+const groqMaxFileSize = 25 * 1024 * 1024; // Groq's own hard limit, do not raise this
 const upload = multer({
   storage: multer.memoryStorage(),
   limits: { fileSize: maxFileSize },
@@ -48,8 +52,10 @@ setInterval(() => {
   }
 }, 5 * 60_000).unref?.();
 
-app.use(express.json({ limit: '25mb' }));
-app.use(express.urlencoded({ extended: true, limit: '25mb' }));
+// Base64-encoded audio (the native JSON fallback path) inflates file size by ~33%,
+// so this needs real headroom above maxFileSize, not just to match it.
+app.use(express.json({ limit: '135mb' }));
+app.use(express.urlencoded({ extended: true, limit: '135mb' }));
 app.use(cors({
   origin(origin, callback) {
     if (!origin || allowedOrigins.includes(origin)) return callback(null, true);
@@ -306,7 +312,10 @@ async function callDeepgramTranscription(audioBuffer, mimeType) {
 
 async function callGeminiSummary(text) {
   if (geminiKeys.length === 0) return null;
-  const geminiModels = ['gemini-3.6-flash', 'gemini-3.7-flash', 'gemini-flash-latest', 'gemini-2.5-flash-lite'];
+  // Real, currently-live Gemini model IDs, fastest/cheapest first. The previous list led with
+  // 'gemini-3.6-flash' and 'gemini-3.7-flash', which do not exist, so every summary silently
+  // burned two guaranteed-404 attempts before ever reaching a model that actually works.
+  const geminiModels = ['gemini-2.5-flash', 'gemini-flash-latest', 'gemini-2.5-flash-lite'];
   for (const apiKey of geminiKeys) {
     for (const model of geminiModels) {
       try {
@@ -347,7 +356,7 @@ async function callGeminiSummary(text) {
 
 async function callGeminiVision(base64Data, mimeType) {
   if (geminiKeys.length === 0) return null;
-  const geminiVisionModels = ['gemini-3.6-flash', 'gemini-3.7-flash', 'gemini-flash-latest'];
+  const geminiVisionModels = ['gemini-2.5-flash', 'gemini-flash-latest', 'gemini-2.5-flash-lite'];
   for (const apiKey of geminiKeys) {
     for (const model of geminiVisionModels) {
       try {
@@ -433,7 +442,14 @@ app.post('/transcribe', authMiddleware, rateLimitMiddleware, idempotencyMiddlewa
 
   console.log(`transcription_request file=${originalFilename} bytes=${audioBuffer.length} groqKeys=${groqKeys.length} deepgramKeys=${deepgramKeys.length}`);
 
-  for (const apiKey of groqKeys) {
+  // Groq will reject anything over 25MB outright, so a long recording should skip
+  // straight to Deepgram instead of burning every key/model combo on a guaranteed failure.
+  const exceedsGroqLimit = audioBuffer.length > groqMaxFileSize;
+  if (exceedsGroqLimit) {
+    console.log(`transcription_skip_groq reason=file_too_large bytes=${audioBuffer.length} limit=${groqMaxFileSize}`);
+  }
+
+  for (const apiKey of exceedsGroqLimit ? [] : groqKeys) {
     for (const model of models) {
       try {
         const form = new FormData();
@@ -494,7 +510,7 @@ app.post('/summarize', authMiddleware, rateLimitMiddleware, idempotencyMiddlewar
     process.env.GROQ_SUMMARY_MODEL,
     'openai/gpt-oss-20b',
     'groq/compound-mini',
-    'qwen/qwen3.8-27b',
+    'qwen/qwen3-32b', // was the non-existent 'qwen/qwen3.8-27b'
     'openai/gpt-oss-120b',
     'llama-3.1-8b-instant',
     'llama-3.3-70b-versatile',
@@ -592,10 +608,13 @@ app.post('/ocr', authMiddleware, rateLimitMiddleware, idempotencyMiddleware, upl
   let lastErrorMessage = '';
 
   // 1. Primary: Groq Vision models
+  // Groq's actual documented vision models (console.groq.com/docs/vision) are the Llama 4
+  // multimodal models, not Qwen. 'qwen/qwen3.8-27b' and 'qwen/qwen3.6-27b' were never real
+  // vision model IDs on Groq, so OCR was falling straight through to Gemini every time.
   const visionModels = [
     process.env.GROQ_VISION_MODEL,
-    'qwen/qwen3.8-27b',
-    'qwen/qwen3.6-27b',
+    'meta-llama/llama-4-scout-17b-16e-instruct',
+    'meta-llama/llama-4-maverick-17b-128e-instruct',
   ].filter(Boolean);
 
   for (const apiKey of groqKeys) {
