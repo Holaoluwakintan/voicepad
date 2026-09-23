@@ -4,7 +4,6 @@ import react from "@vitejs/plugin-react";
 import fs from "node:fs";
 import path from "node:path";
 import { defineConfig, type Plugin, type ViteDevServer } from "vite";
-import { vitePluginManusRuntime } from "vite-plugin-manus-runtime";
 
 // =============================================================================
 // Manus Debug Collector - Vite Plugin
@@ -203,7 +202,15 @@ function vitePluginStorageProxy(): Plugin {
   };
 }
 
-const plugins = [react(), tailwindcss(), jsxLocPlugin(), vitePluginManusRuntime(), vitePluginManusDebugCollector(), vitePluginStorageProxy()];
+// This app was originally scaffolded on the Manus builder platform. The debug-collector
+// and storage-proxy plugins below only run inside `vite dev`/`vite preview` (configureServer
+// hooks), so they never affect the production bundle. vitePluginManusRuntime, previously
+// listed here, was different: it injected an entire extra inline copy of React (~350KB,
+// uncompressed) directly into every built index.html regardless of environment, purely to
+// support previewing inside Manus's own hosting iframe. That's dead weight for a standalone
+// Vercel deployment, so it has been removed. If this app is ever re-embedded inside Manus's
+// platform, it can be re-added.
+const plugins = [react(), tailwindcss(), jsxLocPlugin(), vitePluginManusDebugCollector(), vitePluginStorageProxy()];
 
 export default defineConfig({
   plugins,

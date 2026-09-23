@@ -12,6 +12,24 @@
   <body>
     <div id="root"></div>
     <script type="module" src="/src/main.tsx"></script>
-    <script defer src="%VITE_ANALYTICS_ENDPOINT%/umami" data-website-id="%VITE_ANALYTICS_WEBSITE_ID%"></script>
+    <!--
+      Optional analytics (Umami). Only loads if both env vars are actually set on Vercel;
+      previously this always shipped a broken <script src="%VITE_ANALYTICS_ENDPOINT%/umami">
+      tag whenever the vars were unset, since Vite leaves unresolved %VAR% placeholders
+      as literal text instead of removing the tag.
+    -->
+    <script>
+      (function () {
+        var endpoint = "%VITE_ANALYTICS_ENDPOINT%";
+        var websiteId = "%VITE_ANALYTICS_WEBSITE_ID%";
+        var isUnset = function (v) { return !v || v.indexOf("%VITE_") === 0; };
+        if (isUnset(endpoint) || isUnset(websiteId)) return;
+        var s = document.createElement("script");
+        s.defer = true;
+        s.src = endpoint + "/umami";
+        s.setAttribute("data-website-id", websiteId);
+        document.head.appendChild(s);
+      })();
+    </script>
   </body>
 </html>
