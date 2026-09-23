@@ -1,5 +1,5 @@
 {
-  "buildCommand": "corepack enable && corepack prepare pnpm@10.4.1 --activate && cd web && pnpm install --frozen-lockfile && pnpm run build",
+  "buildCommand": "cd web && pnpm install --no-frozen-lockfile && pnpm run build",
   "outputDirectory": "web/dist/public",
   "rewrites": [
     {
