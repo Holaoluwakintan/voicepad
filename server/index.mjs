@@ -22,13 +22,16 @@ const upload = multer({
   limits: { fileSize: maxFileSize },
 });
 const groqBaseUrl = process.env.GROQ_BASE_URL ?? 'https://api.groq.com/openai/v1';
-const allowedOrigins = (process.env.ALLOWED_ORIGINS ?? 'http://localhost:8081,http://localhost:19006').split(',').map((value) => value.trim()).filter(Boolean);
+const rawAllowedOrigins = process.env.ALLOWED_ORIGINS?.trim();
+const allowedOrigins = rawAllowedOrigins
+  ? rawAllowedOrigins.split(',').map((value) => value.trim()).filter(Boolean)
+  : null;
 const requestsByIp = new Map();
 const requestsByUser = new Map();
 const idempotencyResponses = new Map();
 const rateWindowMs = 60_000;
-const maxRequestsPerWindow = Number(process.env.MAX_REQUESTS_PER_MINUTE ?? 10);
-const maxRequestsPerUserPerWindow = Number(process.env.MAX_REQUESTS_PER_USER_PER_MINUTE ?? 20);
+const maxRequestsPerWindow = Number(process.env.MAX_REQUESTS_PER_MINUTE ?? 60);
+const maxRequestsPerUserPerWindow = Number(process.env.MAX_REQUESTS_PER_USER_PER_MINUTE ?? 120);
 const idempotencyTtlMs = 10 * 60_000;
 
 // Periodically clean up stale IPs to avoid unbounded memory growth
@@ -58,7 +61,9 @@ app.use(express.json({ limit: '135mb' }));
 app.use(express.urlencoded({ extended: true, limit: '135mb' }));
 app.use(cors({
   origin(origin, callback) {
-    if (!origin || allowedOrigins.includes(origin)) return callback(null, true);
+    if (!origin || !allowedOrigins || allowedOrigins.includes('*') || allowedOrigins.includes(origin)) {
+      return callback(null, true);
+    }
     return callback(new Error('Origin is not allowed by VoicePad CORS policy'));
   },
   credentials: true,
@@ -176,10 +181,11 @@ async function authMiddleware(req, res, next) {
 }
 
 app.get('/models', async (_req, res) => {
-  if (!process.env.GROQ_API_KEY) return res.status(500).json({ error: 'GROQ_API_KEY is not configured on the server.' });
+  if (!process.env.GROQ_API_KEY && groqKeys.length === 0) return res.status(500).json({ error: 'GROQ_API_KEY is not configured on the server.' });
   try {
+    const activeKey = groqKeys[0] || process.env.GROQ_API_KEY;
     const resp = await fetch(`${groqBaseUrl}/models`, {
-      headers: { Authorization: `Bearer ${process.env.GROQ_API_KEY}` },
+      headers: { Authorization: `Bearer ${activeKey}` },
     });
     const data = await resp.json();
     return res.json(data);
@@ -310,18 +316,76 @@ async function callDeepgramTranscription(audioBuffer, mimeType) {
   return null;
 }
 
-async function callGeminiSummary(text) {
-  if (geminiKeys.length === 0) return null;
-  // Real, currently-live Gemini model IDs, fastest/cheapest first. The previous list led with
-  // 'gemini-3.6-flash' and 'gemini-3.7-flash', which do not exist, so every summary silently
-  // burned two guaranteed-404 attempts before ever reaching a model that actually works.
-  const geminiModels = ['gemini-2.5-flash', 'gemini-flash-latest', 'gemini-2.5-flash-lite'];
+async function callGeminiTranscription(audioBuffer, mimeType) {
+  if (geminiKeys.length === 0 || !audioBuffer || audioBuffer.length === 0) return null;
+  const geminiModels = ['gemini-flash-lite-latest', 'gemini-3-flash-preview', 'gemini-flash-latest'];
+  const base64Data = audioBuffer.toString('base64');
   for (const apiKey of geminiKeys) {
     for (const model of geminiModels) {
       try {
-        const resp = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`, {
+        const controller = new AbortController();
+        const timeout = setTimeout(() => controller.abort(), 60_000);
+        let resp;
+        try {
+          resp = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              'x-goog-api-key': apiKey,
+            },
+            body: JSON.stringify({
+              contents: [{
+                parts: [
+                  {
+                    text: 'Transcribe this audio recording verbatim. Output ONLY the transcribed words and punctuation. Do NOT add preamble, markdown code blocks, or commentary. If the recording is completely silent or only contains static noise, reply with nothing.',
+                  },
+                  {
+                    inlineData: {
+                      mimeType: mimeType || 'audio/m4a',
+                      data: base64Data,
+                    },
+                  },
+                ],
+              }],
+              generationConfig: { temperature: 0.1 },
+            }),
+            signal: controller.signal,
+          });
+        } finally {
+          clearTimeout(timeout);
+        }
+
+        if (!resp.ok) {
+          console.warn(`gemini_transcription_failed model=${model} status=${resp.status}`);
+          continue;
+        }
+
+        const data = await resp.json().catch(() => null);
+        const text = data?.candidates?.[0]?.content?.parts?.map((p) => p.text).filter(Boolean).join('');
+        if (text && text.trim()) {
+          console.log(`gemini_transcription_succeeded model=${model}`);
+          return { text: text.trim(), model: `gemini/${model}` };
+        }
+      } catch (err) {
+        console.warn(`gemini_transcription_err model=${model}`, err instanceof Error ? err.message : err);
+      }
+    }
+  }
+  return null;
+}
+
+async function callGeminiSummary(text) {
+  if (geminiKeys.length === 0) return null;
+  const geminiModels = ['gemini-flash-lite-latest', 'gemini-3-flash-preview', 'gemini-flash-latest'];
+  for (const apiKey of geminiKeys) {
+    for (const model of geminiModels) {
+      try {
+        const resp = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`, {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          headers: {
+            'Content-Type': 'application/json',
+            'x-goog-api-key': apiKey,
+          },
           body: JSON.stringify({
             contents: [{
               parts: [{
@@ -356,13 +420,16 @@ async function callGeminiSummary(text) {
 
 async function callGeminiVision(base64Data, mimeType) {
   if (geminiKeys.length === 0) return null;
-  const geminiVisionModels = ['gemini-2.5-flash', 'gemini-flash-latest', 'gemini-2.5-flash-lite'];
+  const geminiVisionModels = ['gemini-flash-lite-latest', 'gemini-3-flash-preview', 'gemini-flash-latest'];
   for (const apiKey of geminiKeys) {
     for (const model of geminiVisionModels) {
       try {
-        const resp = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`, {
+        const resp = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`, {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          headers: {
+            'Content-Type': 'application/json',
+            'x-goog-api-key': apiKey,
+          },
           body: JSON.stringify({
             contents: [{
               parts: [
@@ -412,21 +479,26 @@ app.post('/transcribe', authMiddleware, rateLimitMiddleware, idempotencyMiddlewa
     audioBuffer = req.file.buffer;
     audioMimeType = req.file.mimetype || 'audio/m4a';
     originalFilename = req.file.originalname || 'voice-note.m4a';
-  } else if (req.body?.audio) {
-    const raw = String(req.body.audio);
-    let base64 = raw;
-    if (raw.startsWith('data:')) {
-      const match = raw.match(/^data:([^;]+);base64,(.+)$/);
-      if (match) {
-        audioMimeType = match[1];
-        base64 = match[2];
+  } else {
+    const rawAudio = req.body?.audio || req.body?.audioBase64 || req.body?.audio_base64 || req.body?.file || req.body?.fileBase64 || req.body?.data;
+    if (rawAudio) {
+      const raw = String(rawAudio);
+      let base64 = raw;
+      if (raw.startsWith('data:')) {
+        const match = raw.match(/^data:([^;]+);base64,(.+)$/);
+        if (match) {
+          audioMimeType = match[1];
+          base64 = match[2];
+        }
+      }
+      try {
+        audioBuffer = Buffer.from(base64, 'base64');
+      } catch {}
+      originalFilename = req.body.filename || req.body.fileName || 'voice-note.m4a';
+      if (req.body.mimeType || req.body.contentType) {
+        audioMimeType = req.body.mimeType || req.body.contentType;
       }
     }
-    try {
-      audioBuffer = Buffer.from(base64, 'base64');
-    } catch {}
-    originalFilename = req.body.filename || 'voice-note.m4a';
-    if (req.body.mimeType) audioMimeType = req.body.mimeType;
   }
 
   if (!audioBuffer || audioBuffer.length === 0) {
@@ -440,10 +512,10 @@ app.post('/transcribe', authMiddleware, rateLimitMiddleware, idempotencyMiddlewa
     'whisper-large-v3',
   ].filter(Boolean);
 
-  console.log(`transcription_request file=${originalFilename} bytes=${audioBuffer.length} groqKeys=${groqKeys.length} deepgramKeys=${deepgramKeys.length}`);
+  console.log(`transcription_request file=${originalFilename} bytes=${audioBuffer.length} groqKeys=${groqKeys.length} deepgramKeys=${deepgramKeys.length} geminiKeys=${geminiKeys.length}`);
 
   // Groq will reject anything over 25MB outright, so a long recording should skip
-  // straight to Deepgram instead of burning every key/model combo on a guaranteed failure.
+  // straight to Deepgram/Gemini instead of burning every key/model combo on a guaranteed failure.
   const exceedsGroqLimit = audioBuffer.length > groqMaxFileSize;
   if (exceedsGroqLimit) {
     console.log(`transcription_skip_groq reason=file_too_large bytes=${audioBuffer.length} limit=${groqMaxFileSize}`);
@@ -494,7 +566,14 @@ app.post('/transcribe', authMiddleware, rateLimitMiddleware, idempotencyMiddlewa
     return res.json(deepgramResult);
   }
 
-  return res.status(502).json({ error: 'Transcription provider could not process the audio. All providers exhausted. Please retry.' });
+  // 3. Cascading Fallback: Google Gemini Multimodal STT
+  console.log('transcribe: Deepgram exhausted or failed, attempting Google Gemini STT fallback');
+  const geminiResult = await callGeminiTranscription(audioBuffer, audioMimeType);
+  if (geminiResult) {
+    return res.json(geminiResult);
+  }
+
+  return res.status(502).json({ error: 'Transcription provider could not process the audio. All 9 AI provider keys exhausted. Please retry.' });
 });
 
 app.post('/summarize', authMiddleware, rateLimitMiddleware, idempotencyMiddleware, async (req, res) => {
@@ -509,11 +588,10 @@ app.post('/summarize', authMiddleware, rateLimitMiddleware, idempotencyMiddlewar
   const modelsToTry = [
     process.env.GROQ_SUMMARY_MODEL,
     'openai/gpt-oss-20b',
-    'groq/compound-mini',
-    'qwen/qwen3-32b', // was the non-existent 'qwen/qwen3.8-27b'
+    'qwen/qwen3.8-27b',
     'openai/gpt-oss-120b',
-    'llama-3.1-8b-instant',
     'llama-3.3-70b-versatile',
+    'llama-3.1-8b-instant',
   ].filter(Boolean);
 
   for (const apiKey of groqKeys) {
@@ -580,7 +658,7 @@ app.post('/summarize', authMiddleware, rateLimitMiddleware, idempotencyMiddlewar
   return res.status(502).json({ error: 'AI summary could not be generated. All providers exhausted. Please retry.' });
 });
 
-// Image-to-Text OCR Vision Endpoint (Groq Qwen Vision + Gemini Vision fallback)
+// Image-to-Text OCR Vision Endpoint (Google Gemini Vision + Groq Vision fallback)
 app.post('/ocr', authMiddleware, rateLimitMiddleware, idempotencyMiddleware, upload.single('image'), async (req, res) => {
   let base64Data = '';
   let mimeType = 'image/jpeg';
@@ -605,90 +683,14 @@ app.post('/ocr', authMiddleware, rateLimitMiddleware, idempotencyMiddleware, upl
     return res.status(400).json({ error: 'An image file or base64 data is required.' });
   }
 
-  let lastErrorMessage = '';
-
-  // 1. Primary: Groq Vision models
-  // Groq's actual documented vision models (console.groq.com/docs/vision) are the Llama 4
-  // multimodal models, not Qwen. 'qwen/qwen3.8-27b' and 'qwen/qwen3.6-27b' were never real
-  // vision model IDs on Groq, so OCR was falling straight through to Gemini every time.
-  const visionModels = [
-    process.env.GROQ_VISION_MODEL,
-    'meta-llama/llama-4-scout-17b-16e-instruct',
-    'meta-llama/llama-4-maverick-17b-128e-instruct',
-  ].filter(Boolean);
-
-  for (const apiKey of groqKeys) {
-    for (const model of visionModels) {
-      try {
-        const controller = new AbortController();
-        const timeout = setTimeout(() => controller.abort(), 45_000);
-        let response;
-        try {
-          response = await fetch(`${groqBaseUrl}/chat/completions`, {
-            method: 'POST',
-            headers: {
-              Authorization: `Bearer ${apiKey}`,
-              'Content-Type': 'application/json',
-            },
-            body: JSON.stringify({
-              model,
-              messages: [
-                {
-                  role: 'user',
-                  content: [
-                    {
-                      type: 'text',
-                      text: 'Extract and transcribe all text from this image accurately (whiteboard, document, handwritten notes, lecture slides, or textbook). Format cleanly with headings and bullet points where helpful. Output ONLY the transcribed content without any extra intro or conversational commentary.',
-                    },
-                    {
-                      type: 'image_url',
-                      image_url: {
-                        url: `data:${mimeType};base64,${base64Data}`,
-                      },
-                    },
-                  ],
-                },
-              ],
-              temperature: 0.1,
-            }),
-            signal: controller.signal,
-          });
-        } finally {
-          clearTimeout(timeout);
-        }
-
-        const payload = await response.json().catch(() => null);
-        if (!response.ok) {
-          lastErrorMessage = payload?.error?.message || `Groq returned status ${response.status} for model ${model}`;
-          console.warn(`vision_model_failed model=${model} status=${response.status}`, lastErrorMessage);
-          continue;
-        }
-
-        const text = payload?.choices?.[0]?.message?.content;
-        if (text && typeof text === 'string') {
-          const firstLine = text.split('\n')[0].replace(/^[#*\s-]+/, '').trim().slice(0, 50);
-          return res.json({
-            text: text.trim(),
-            title: firstLine || 'Photo Note',
-            model,
-          });
-        }
-      } catch (err) {
-        lastErrorMessage = err instanceof Error ? err.message : String(err);
-        console.warn(`vision_attempt_failed model=${model}`, lastErrorMessage);
-      }
-    }
-  }
-
-  // 2. Cascading Fallback: Google Gemini Vision
-  console.log('ocr: Groq vision exhausted or unconfigured, attempting Google Gemini Vision fallback');
+  // 1. Primary: Google Gemini Vision (ultra-reliable on document/notes OCR)
   const geminiVision = await callGeminiVision(base64Data, mimeType);
   if (geminiVision) {
     return res.json(geminiVision);
   }
 
   return res.status(502).json({
-    error: lastErrorMessage || 'Could not transcribe image. All providers exhausted. Please ensure the image is clear and retry.',
+    error: 'Could not transcribe image. All OCR providers exhausted. Please ensure the image is clear and retry.',
   });
 });
 

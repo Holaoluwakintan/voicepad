@@ -119,7 +119,7 @@ async function performTranscriptionAttempt(
     }
   }
 
-  // 3. Web path: fetch Blob and send FormData
+  // 3. Web path: fetch Blob and attempt FormData upload with automatic Base64 JSON fallback
   let audioBlob: Blob;
   try {
     const blobResponse = await fetch(audioUri);
@@ -129,41 +129,107 @@ async function performTranscriptionAttempt(
     throw new Error('Could not read the audio recording. Please record again and try once more.');
   }
 
-  const extension = audioBlob.type.includes('ogg')
+  const mimeType = audioBlob.type || 'audio/m4a';
+  const extension = mimeType.includes('ogg')
     ? 'ogg'
-    : audioBlob.type.includes('mp4')
+    : mimeType.includes('mp4') || mimeType.includes('m4a')
     ? 'm4a'
+    : mimeType.includes('wav')
+    ? 'wav'
+    : mimeType.includes('mp3')
+    ? 'mp3'
     : 'webm';
 
-  const form = new FormData();
-  form.append('noteId', options.noteId);
-  form.append('mode', 'english');
-  form.append('file', audioBlob, `voicepad-${options.noteId}.${extension}`);
+  const webFilename = options.filename ?? `voicepad-${options.noteId}.${extension}`;
 
-  const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
+  // 3a. Primary Web Attempt: Multipart FormData
   try {
-    const response = await fetch(`${TRANSCRIPTION_API_URL}/transcribe`, {
-      method: 'POST',
-      headers: {
-        'Idempotency-Key': idempotencyKey,
-        ...authHeaders,
-      },
-      body: form,
-      signal: controller.signal,
+    const form = new FormData();
+    form.append('noteId', options.noteId);
+    form.append('mode', 'english');
+    form.append('file', audioBlob, webFilename);
+
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
+    try {
+      const response = await fetch(`${TRANSCRIPTION_API_URL}/transcribe`, {
+        method: 'POST',
+        headers: {
+          'Idempotency-Key': idempotencyKey,
+          ...authHeaders,
+        },
+        body: form,
+        signal: controller.signal,
+      });
+
+      const payload = await response.json().catch(() => null);
+      if (response.ok && payload?.text && typeof payload.text === 'string') {
+        return { text: payload.text.trim() };
+      }
+      if (!response.ok) {
+        throw new Error(payload?.error ?? `Transcription failed (${response.status})`);
+      }
+    } finally {
+      clearTimeout(timeout);
+    }
+  } catch (webFormErr: any) {
+    console.warn('Web FormData upload failed, attempting Web Base64 fallback:', webFormErr?.message);
+    if (webFormErr?.name === 'AbortError') {
+      throw new Error('Transcription timed out. The server may still be waking up. Please retry.');
+    }
+  }
+
+  // 3b. Web Fallback: Convert Blob to Base64 JSON payload
+  try {
+    const base64Data = await new Promise<string>((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onloadend = () => {
+        const result = reader.result as string;
+        const commaIndex = result.indexOf(',');
+        resolve(commaIndex !== -1 ? result.slice(commaIndex + 1) : result);
+      };
+      reader.onerror = reject;
+      reader.readAsDataURL(audioBlob);
     });
 
-    const payload = await response.json().catch(() => null);
-    if (!response.ok) {
-      throw new Error(payload?.error ?? `Transcription failed (${response.status})`);
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
+    try {
+      const response = await fetch(`${TRANSCRIPTION_API_URL}/transcribe`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Accept: 'application/json',
+          'Idempotency-Key': idempotencyKey,
+          ...authHeaders,
+        },
+        body: JSON.stringify({
+          audio: base64Data,
+          filename: webFilename,
+          mimeType,
+          noteId: options.noteId,
+        }),
+        signal: controller.signal,
+      });
+
+      const payload = await response.json().catch(() => null);
+      if (response.ok && payload?.text && typeof payload.text === 'string') {
+        return { text: payload.text.trim() };
+      }
+      if (!response.ok) {
+        throw new Error(payload?.error ?? `Transcription failed (${response.status})`);
+      }
+    } finally {
+      clearTimeout(timeout);
     }
-    if (payload?.text && typeof payload.text === 'string') {
-      return { text: payload.text.trim() };
+  } catch (base64Err: any) {
+    if (base64Err?.name === 'AbortError') {
+      throw new Error('Transcription timed out. The server may still be waking up. Please retry.');
     }
-    throw new Error('Server returned an empty transcript.');
-  } finally {
-    clearTimeout(timeout);
+    throw base64Err;
   }
+
+  throw new Error('Server returned an empty transcript.');
 }
 
 export async function transcribeAudio(
