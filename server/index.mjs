@@ -1,7 +1,17 @@
+// ====================
+//  Imports & Core Setup
+// ====================
 import crypto from 'node:crypto';
 import cors from 'cors';
 import express from 'express';
 import multer from 'multer';
+// Security & utilities
+import helmet from 'helmet';
+import csurf from 'csurf';
+import Redis from 'ioredis';
+import pino from 'pino';
+import pinoHttp from 'pino-http';
+import { z } from 'zod';
 
 if (typeof process.loadEnvFile === 'function') {
   try { process.loadEnvFile(); } catch {}
@@ -11,11 +21,28 @@ if (typeof process.loadEnvFile === 'function') {
 const app = express();
 app.set('trust proxy', 1);
 
+// --------------------
+//  Logger configuration
+// --------------------
+const logger = pino({ level: process.env.LOG_LEVEL || 'info' });
+app.use(pinoHttp({ logger }));
+
+// --------------------
+//  Security middlewares
+// --------------------
+app.use(helmet());
+// CORS will be configured later (see lines 31‑40)
+
+// --------------------
+//  Redis client (required for rate‑limiting & idempotency)
+// --------------------
+const redis = new Redis(process.env.REDIS_URL);
+
 const port = Number(process.env.PORT ?? 8787);
-// Groq's Whisper endpoint hard-caps uploads at 25MB (their limit, not ours), but Deepgram
+// Groq's Whisper endpoint hard‑caps uploads at 25 MB (their limit, not ours), but Deepgram
 // happily accepts much larger files. So the server itself accepts bigger recordings and
-// decides per-request which provider to use, instead of rejecting long recordings outright.
-const maxFileSize = 100 * 1024 * 1024; // 100MB ceiling for a single recording
+// decides per‑request which provider to use, instead of rejecting long recordings outright.
+const maxFileSize = 100 * 1024 * 1024; // 100 MB ceiling for a single recording
 const groqMaxFileSize = 25 * 1024 * 1024; // Groq's own hard limit, do not raise this
 const upload = multer({
   storage: multer.memoryStorage(),
