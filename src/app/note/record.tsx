@@ -170,8 +170,8 @@ export default function RecordScreen() {
 
       if (user?.id) {
         uploadAudioToCloud(user.id, noteId, uri)
-          .then((path) => { if (path) updateNote(noteId, { audioPath: path }); })
-          .catch(() => {});
+          .then((path) => updateNote(noteId, path ? { audioPath: path, audioUploadStatus: 'uploaded' } : { audioUploadStatus: 'failed' }))
+          .catch(() => updateNote(noteId, { audioUploadStatus: 'failed' }));
       }
 
       transcribeSavedNote(uri, noteId);
@@ -231,8 +231,8 @@ export default function RecordScreen() {
 
       if (user?.id) {
         uploadAudioToCloud(user.id, noteId, uri)
-          .then((path) => { if (path) updateNote(noteId, { audioPath: path }); })
-          .catch(() => {});
+          .then((path) => updateNote(noteId, path ? { audioPath: path, audioUploadStatus: 'uploaded' } : { audioUploadStatus: 'failed' }))
+          .catch(() => updateNote(noteId, { audioUploadStatus: 'failed' }));
       }
 
       transcribeSavedNote(uri, noteId, fileName);

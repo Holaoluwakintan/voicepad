@@ -2,6 +2,9 @@
 
 alter table public.voicepad_notes add column if not exists revision bigint not null default 1;
 alter table public.voicepad_notes add column if not exists updated_by_device text;
+alter table public.voicepad_notes add column if not exists audio_upload_status text;
+alter table public.voicepad_notes drop constraint if exists voicepad_notes_audio_upload_status_check;
+alter table public.voicepad_notes add constraint voicepad_notes_audio_upload_status_check check (audio_upload_status in ('pending', 'uploaded', 'failed') or audio_upload_status is null);
 
 -- Local device URIs are not portable. Keep the legacy column for compatibility,
 -- but prevent new writes from treating it as cloud metadata in the client.

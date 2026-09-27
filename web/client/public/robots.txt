@@ -1,0 +1,7 @@
+User-agent: *
+Allow: /
+Disallow: /studio
+Disallow: /account
+Disallow: /settings
+
+Sitemap: https://voicepad.app/sitemap.xml

@@ -1,0 +1,10 @@
+{
+  "name": "VoicePad — voice notes that think with you",
+  "short_name": "VoicePad",
+  "description": "Turn spoken thoughts into clear, useful, searchable notes.",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#24201f",
+  "theme_color": "#ce917f",
+  "icons": []
+}

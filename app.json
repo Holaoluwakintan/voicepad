@@ -3,6 +3,7 @@
     "name": "voicepad",
     "slug": "voicepad",
     "version": "1.0.0",
+    "description": "Private AI voice notes, transcription, summaries, and photo-to-text capture for ideas that should not get lost.",
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
     "scheme": "voicepad",

@@ -6,10 +6,12 @@
   "build": {
     "development": {
       "developmentClient": true,
-      "distribution": "internal"
+      "distribution": "internal",
+      "environment": "development"
     },
     "preview": {
       "distribution": "internal",
+      "environment": "preview",
       "android": {
         "buildType": "apk"
       },
@@ -21,6 +23,7 @@
     },
     "production": {
       "autoIncrement": true,
+      "environment": "production",
       "env": {
         "EXPO_PUBLIC_TRANSCRIPTION_API_URL": "https://voicepad-transcription.onrender.com",
         "EXPO_PUBLIC_SUPABASE_URL": "https://vfwdrpvfcvwsrhxuabak.supabase.co",

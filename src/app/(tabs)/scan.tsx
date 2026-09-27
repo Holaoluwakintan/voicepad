@@ -101,6 +101,7 @@ export default function ScanScreen() {
       try { Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium); } catch {}
 
       const pageTexts: { page: number; text: string }[] = [];
+      const failedPages: number[] = [];
       for (let i = 0; i < validAssets.length; i++) {
         setScanProgress({ current: i + 1, total: validAssets.length });
         const asset = validAssets[i];
@@ -111,6 +112,7 @@ export default function ScanScreen() {
             pageTexts.push({ page: i + 1, text: ocr.text.trim() });
           }
         } catch (pageErr) {
+          failedPages.push(i + 1);
           console.warn(`Error transcribing page ${i + 1}`, pageErr);
         }
       }
@@ -132,6 +134,9 @@ export default function ScanScreen() {
           .join('\n\n---\n\n');
       }
 
+      if (failedPages.length > 0) {
+        combinedContent += `\n\n[Pages not read: ${failedPages.join(', ')}. Retry those pages with clearer photos.]`;
+      }
       setExtractedText(combinedContent);
       setExtractedTitle(finalTitle);
       setScanState('done');
@@ -251,7 +256,7 @@ export default function ScanScreen() {
               {/* Result header */}
               <View style={styles.resultHeaderRow}>
                 <View style={styles.resultTitleBlock}>
-                  <ThemedText style={styles.resultLabel}>✅ Text extracted</ThemedText>
+                  <ThemedText style={styles.resultLabel}>✅ Text extracted — review before saving</ThemedText>
                   <ThemedText style={styles.resultTitle} numberOfLines={1}>{extractedTitle}</ThemedText>
                 </View>
                 <Pressable onPress={reset} style={styles.scanAgainBtn}>

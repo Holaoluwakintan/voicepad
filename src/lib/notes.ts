@@ -17,6 +17,7 @@ export type Note = {
   deletedAt?: string | null;
   audioUri?: string;
   audioPath?: string;
+  audioUploadStatus?: 'pending' | 'uploaded' | 'failed';
   source?: 'voice' | 'text';
   category?: NoteCategory;
   durationSeconds?: number;

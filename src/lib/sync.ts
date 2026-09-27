@@ -2,7 +2,7 @@ import { Note, loadNotes, saveNotes, updateNote } from './notes';
 import { supabase } from './supabase';
 import { uploadAudioToCloud } from './storage';
 
-export type SyncResult = { ok: boolean; message?: string };
+export type SyncResult = { ok: boolean; message?: string; audioFailed?: number; conflicts?: number };
 
 function toRow(note: Note, userId: string) {
   return {
@@ -16,6 +16,7 @@ function toRow(note: Note, userId: string) {
     // A device-local URI is not portable and must never be written to cloud metadata.
     audio_uri: null,
     audio_path: note.audioPath ?? null,
+    audio_upload_status: note.audioUploadStatus ?? (note.audioPath ? 'uploaded' : note.audioUri ? 'pending' : null),
     source: note.source ?? 'voice',
     category: note.category ?? 'Personal',
     duration_seconds: note.durationSeconds ?? null,
@@ -38,6 +39,9 @@ function fromRow(row: Record<string, unknown>): Note {
     // Legacy audio_uri values are intentionally ignored. Use audio_path for cloud audio.
     audioUri: undefined,
     audioPath: typeof row.audio_path === 'string' ? row.audio_path : undefined,
+    audioUploadStatus: ['pending', 'uploaded', 'failed'].includes(String(row.audio_upload_status))
+      ? (row.audio_upload_status as Note['audioUploadStatus'])
+      : undefined,
     source: row.source === 'text' ? 'text' : 'voice',
     category: ['Lectures', 'Sermons', 'Meetings', 'Personal'].includes(String(row.category))
       ? (row.category as Note['category'])
@@ -58,6 +62,8 @@ export async function syncNotes(userId: string): Promise<SyncResult> {
 
   try {
     const localNotes = await loadNotes(true);
+    let audioFailed = 0;
+    let conflicts = 0;
 
     for (const note of localNotes) {
       if (note.source === 'voice' && note.audioUri && !note.audioPath && !note.deletedAt) {
@@ -65,10 +71,17 @@ export async function syncNotes(userId: string): Promise<SyncResult> {
           const uploadedPath = await uploadAudioToCloud(userId, note.id, note.audioUri);
           if (uploadedPath) {
             note.audioPath = uploadedPath;
-            await updateNote(note.id, { audioPath: uploadedPath });
+            note.audioUploadStatus = 'uploaded';
+            await updateNote(note.id, { audioPath: uploadedPath, audioUploadStatus: 'uploaded' });
+          } else {
+            audioFailed += 1;
+            note.audioUploadStatus = 'failed';
+            await updateNote(note.id, { audioUploadStatus: 'failed' });
           }
         } catch {
-          // Continue note sync; audio can be retried without exposing its local URI.
+          audioFailed += 1;
+          note.audioUploadStatus = 'failed';
+          await updateNote(note.id, { audioUploadStatus: 'failed' });
         }
       }
     }
@@ -124,7 +137,10 @@ export async function syncNotes(userId: string): Promise<SyncResult> {
       await saveNotes(Array.from(mergedMap.values()));
     }
 
-    return { ok: true };
+    const message = audioFailed || conflicts
+      ? `${audioFailed ? `${audioFailed} audio file${audioFailed === 1 ? '' : 's'} need retry` : ''}${audioFailed && conflicts ? '; ' : ''}${conflicts ? `${conflicts} sync conflict${conflicts === 1 ? '' : 's'} need review` : ''}.`
+      : undefined;
+    return { ok: true, message, audioFailed, conflicts };
   } catch (err) {
     console.error('syncNotes failed:', err);
     return { ok: false, message: 'Cloud sync is temporarily unavailable. Your local notes are safe.' };

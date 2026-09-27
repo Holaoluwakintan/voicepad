@@ -1,4 +1,3 @@
-import { jsxLocPlugin } from "@builder.io/vite-plugin-jsx-loc";
 import tailwindcss from "@tailwindcss/vite";
 import react from "@vitejs/plugin-react";
 import fs from "node:fs";
@@ -210,7 +209,7 @@ function vitePluginStorageProxy(): Plugin {
 // support previewing inside Manus's own hosting iframe. That's dead weight for a standalone
 // Vercel deployment, so it has been removed. If this app is ever re-embedded inside Manus's
 // platform, it can be re-added.
-const plugins = [react(), tailwindcss(), jsxLocPlugin(), vitePluginManusDebugCollector(), vitePluginStorageProxy()];
+const plugins = [react(), tailwindcss(), vitePluginManusDebugCollector(), vitePluginStorageProxy()];
 
 export default defineConfig({
   plugins,

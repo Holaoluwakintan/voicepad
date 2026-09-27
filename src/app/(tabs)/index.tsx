@@ -23,6 +23,8 @@ import Animated, { FadeInDown } from 'react-native-reanimated';
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
 import { loadNotes, insertNote, removeNote, Note, NoteCategory, formatDuration } from '@/lib/notes';
+import { deleteAudioFromCloud } from '@/lib/storage';
+import { AdMobBanner } from '@/components/admob-banner';
 import { useAuth } from '@/lib/auth';
 import { DS } from '@/constants/design';
 import { formatNoteDate, generateNoteId } from '@/lib/utils';
@@ -223,6 +225,7 @@ export default function HomeScreen() {
         onPress: async () => {
           try { await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning); } catch {}
           await removeNote(note.id);
+          if (note.audioPath) await deleteAudioFromCloud(note.audioPath);
           setSelectedNote(null);
           await fetchNotes();
         },
@@ -307,6 +310,8 @@ export default function HomeScreen() {
                   </View>
                 </View>
               </View>
+
+              <AdMobBanner />
 
               {/* Search */}
               <View style={styles.searchBox}>

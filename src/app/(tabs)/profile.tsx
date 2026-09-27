@@ -74,7 +74,7 @@ export default function ProfileScreen() {
   useEffect(() => {
     if (!user) return;
     syncNotes(user.id).then(async (result) => {
-      setSyncMessage(result.ok ? 'Synced just now.' : result.message ?? 'Sync unavailable.');
+      setSyncMessage(result.ok ? (result.message || 'Synced just now.') : result.message ?? 'Sync unavailable.');
       if (result.ok) setNotes(await loadNotes());
     });
   }, [user]);
@@ -162,7 +162,7 @@ export default function ProfileScreen() {
     try { await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light); } catch {}
     const result = await syncNotes(user.id);
     setAuthAction(null);
-    setSyncMessage(result.ok ? 'Synced just now.' : result.message ?? 'Sync unavailable.');
+    setSyncMessage(result.ok ? (result.message || 'Synced just now.') : result.message ?? 'Sync unavailable.');
     if (result.ok) {
       try { await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success); } catch {}
       setNotes(await loadNotes());

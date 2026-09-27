@@ -32,7 +32,7 @@ import {
   Note,
   NoteCategory,
 } from '@/lib/notes';
-import { getSignedAudioUrl } from '@/lib/storage';
+import { deleteAudioFromCloud, getSignedAudioUrl } from '@/lib/storage';
 import { DS } from '@/constants/design';
 import { formatNoteDate, toFriendlyErrorMessage } from '@/lib/utils';
 
@@ -204,6 +204,7 @@ export default function NoteDetailScreen() {
             await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning);
           } catch {}
           await removeNote(note.id);
+          if (note.audioPath) await deleteAudioFromCloud(note.audioPath);
           router.back();
         },
       },
@@ -269,6 +270,7 @@ export default function NoteDetailScreen() {
             value={title}
             onChangeText={setTitle}
             style={styles.titleInput}
+            accessibilityLabel="Note title"
             placeholder="Note title"
             placeholderTextColor={DS.colors.subtle}
           />
@@ -376,6 +378,7 @@ export default function NoteDetailScreen() {
               onChangeText={setContent}
               multiline
               textAlignVertical="top"
+              accessibilityLabel="Transcript or note content"
               placeholder="Transcript or note content…"
               placeholderTextColor={DS.colors.subtle}
               style={styles.contentInput}

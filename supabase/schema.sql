@@ -13,6 +13,7 @@ create table if not exists public.voicepad_notes (
   deleted_at timestamptz default null,
   audio_uri text,
   audio_path text,
+  audio_upload_status text check (audio_upload_status in ('pending', 'uploaded', 'failed')),
   source text not null default 'voice' check (source in ('voice', 'text')),
   category text not null default 'Personal' check (category in ('Lectures', 'Sermons', 'Meetings', 'Personal')),
   duration_seconds integer,

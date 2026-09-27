@@ -204,6 +204,7 @@ export default function NotesScreen() {
                 <TextInput
                   value={noteTitle}
                   onChangeText={setNoteTitle}
+                  accessibilityLabel="Note title"
                   placeholder="Note Title…"
                   placeholderTextColor={DS.colors.subtle}
                   style={styles.titleInput}
@@ -211,6 +212,7 @@ export default function NotesScreen() {
                 <TextInput
                   value={noteContent}
                   onChangeText={setNoteContent}
+                  accessibilityLabel="Note content"
                   placeholder="Start typing your note here…"
                   placeholderTextColor={DS.colors.subtle}
                   multiline

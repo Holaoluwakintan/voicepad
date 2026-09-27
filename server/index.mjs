@@ -25,7 +25,8 @@ const groqBaseUrl = process.env.GROQ_BASE_URL ?? 'https://api.groq.com/openai/v1
 const rawAllowedOrigins = process.env.ALLOWED_ORIGINS?.trim();
 const allowedOrigins = rawAllowedOrigins
   ? rawAllowedOrigins.split(',').map((value) => value.trim()).filter(Boolean)
-  : null;
+  : [];
+const isProduction = process.env.NODE_ENV === 'production';
 const requestsByIp = new Map();
 const requestsByUser = new Map();
 const idempotencyResponses = new Map();
@@ -61,7 +62,7 @@ app.use(express.json({ limit: '135mb' }));
 app.use(express.urlencoded({ extended: true, limit: '135mb' }));
 app.use(cors({
   origin(origin, callback) {
-    if (!origin || !allowedOrigins || allowedOrigins.includes('*') || allowedOrigins.includes(origin)) {
+    if (!origin || (allowedOrigins.length > 0 && (allowedOrigins.includes('*') || allowedOrigins.includes(origin)))) {
       return callback(null, true);
     }
     return callback(new Error('Origin is not allowed by VoicePad CORS policy'));
@@ -154,8 +155,8 @@ app.get('/terms', (_req, res) => res.type('html').send(renderLegalHtml('Terms of
 
 const supabaseUrl = (process.env.SUPABASE_URL ?? process.env.EXPO_PUBLIC_SUPABASE_URL ?? '').trim();
 const supabaseAnonKey = (process.env.SUPABASE_ANON_KEY ?? process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY ?? '').trim();
-// Only require authentication if explicitly configured in environment variables
-const requireAuth = process.env.REQUIRE_AUTH === 'true';
+// Require authentication in production by default; guest mode must be an explicit opt-out.
+const requireAuth = process.env.REQUIRE_AUTH === 'true' || (isProduction && process.env.REQUIRE_AUTH !== 'false');
 
 async function authMiddleware(req, res, next) {
   const authHeader = req.headers.authorization;
@@ -504,6 +505,9 @@ app.post('/transcribe', authMiddleware, rateLimitMiddleware, idempotencyMiddlewa
   if (!audioBuffer || audioBuffer.length === 0) {
     return res.status(400).json({ error: 'Audio file or base64 data is required.' });
   }
+  if (audioBuffer.length > maxFileSize) {
+    return res.status(413).json({ error: `Audio file is larger than ${Math.round(maxFileSize / (1024 * 1024))} MB.` });
+  }
 
   // 1. Primary: Groq Whisper models across all configured Groq keys
   const models = [
@@ -683,6 +687,10 @@ app.post('/ocr', authMiddleware, rateLimitMiddleware, idempotencyMiddleware, upl
     return res.status(400).json({ error: 'An image file or base64 data is required.' });
   }
 
+  if (!base64Data || base64Data.length > 20 * 1024 * 1024) {
+    return res.status(413).json({ error: 'Image is too large. Choose an image under 15 MB.' });
+  }
+
   // 1. Primary: Google Gemini Vision (ultra-reliable on document/notes OCR)
   const geminiVision = await callGeminiVision(base64Data, mimeType);
   if (geminiVision) {
@@ -696,7 +704,7 @@ app.post('/ocr', authMiddleware, rateLimitMiddleware, idempotencyMiddleware, upl
 
 app.use((error, _req, res, _next) => {
   if (error?.message?.includes('CORS')) return res.status(403).json({ error: 'Origin is not allowed.' });
-  if (error?.code === 'LIMIT_FILE_SIZE') return res.status(413).json({ error: 'Audio file is larger than 25 MB.' });
+  if (error?.code === 'LIMIT_FILE_SIZE') return res.status(413).json({ error: `Audio file is larger than ${Math.round(maxFileSize / (1024 * 1024))} MB.` });
   return res.status(400).json({ error: error?.message || 'Invalid request.' });
 });
 
