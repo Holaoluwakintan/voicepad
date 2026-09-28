@@ -47,3 +47,26 @@ test('a transcribe request without an Idempotency-Key is no longer hard-rejected
   assert.equal(response.status, 401);
   assert.match(response.body.error, /Authentication required/i);
 });
+
+test('web preview guest requests bypass auth check and proceed to audio validation', async () => {
+  const response = await request(app)
+    .post('/transcribe')
+    .set('X-Client-Type', 'web')
+    .send();
+  // Status should be 400 (audio missing), NOT 401 (auth required)
+  assert.equal(response.status, 400);
+  assert.match(response.body.error, /Audio file or base64 data is required/i);
+});
+
+test('web preview guest audio over 25MB is capped with upgrade prompt', async () => {
+  // Create dummy audio buffer > 25MB
+  const bigBuffer = Buffer.alloc(26 * 1024 * 1024, 0);
+  const response = await request(app)
+    .post('/transcribe')
+    .set('X-Client-Type', 'web')
+    .attach('file', bigBuffer, 'long-preview.m4a');
+  assert.equal(response.status, 429);
+  assert.equal(response.body.limitReached, true);
+  assert.match(response.body.error, /10 minutes/i);
+});
+

@@ -49,8 +49,10 @@ async function performTranscriptionAttempt(
           headers: {
             Accept: 'application/json',
             'Idempotency-Key': idempotencyKey,
+            'X-Client-Type': 'mobile',
             ...authHeaders,
           },
+
         }
       );
 
@@ -89,8 +91,10 @@ async function performTranscriptionAttempt(
             'Content-Type': 'application/json',
             Accept: 'application/json',
             'Idempotency-Key': idempotencyKey,
+            'X-Client-Type': 'mobile',
             ...authHeaders,
           },
+
           body: JSON.stringify({
             audio: base64Audio,
             filename: nativeFilename,
@@ -156,6 +160,7 @@ async function performTranscriptionAttempt(
         method: 'POST',
         headers: {
           'Idempotency-Key': idempotencyKey,
+          'X-Client-Type': Platform.OS === 'web' ? 'web' : 'mobile',
           ...authHeaders,
         },
         body: form,
@@ -201,8 +206,10 @@ async function performTranscriptionAttempt(
           'Content-Type': 'application/json',
           Accept: 'application/json',
           'Idempotency-Key': idempotencyKey,
+          'X-Client-Type': Platform.OS === 'web' ? 'web' : 'mobile',
           ...authHeaders,
         },
+
         body: JSON.stringify({
           audio: base64Data,
           filename: webFilename,

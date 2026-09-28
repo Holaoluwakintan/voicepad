@@ -1,3 +1,4 @@
+import { Platform } from 'react-native';
 import { TRANSCRIPTION_API_URL, toFriendlyErrorMessage } from '@/lib/utils';
 import { getAuthHeaders } from '@/lib/supabase';
 
@@ -28,8 +29,10 @@ export async function generateAISummary(transcript: string): Promise<SummaryResu
         headers: {
           'Content-Type': 'application/json',
           'Idempotency-Key': summaryKey,
+          'X-Client-Type': Platform.OS === 'web' ? 'web' : 'mobile',
           ...authHeaders,
         },
+
         body: JSON.stringify({ text: clean }),
         signal: controller.signal,
       });
@@ -95,8 +98,10 @@ export async function transcribeImage(base64Image: string, mimeType = 'image/jpe
         headers: {
           'Content-Type': 'application/json',
           'Idempotency-Key': ocrKey,
+          'X-Client-Type': Platform.OS === 'web' ? 'web' : 'mobile',
           ...authHeaders,
         },
+
         body: JSON.stringify({
           image: clean.startsWith('data:') ? clean : `data:${mimeType};base64,${clean}`,
         }),

@@ -205,8 +205,8 @@ async function authMiddleware(req, res, next) {
     } catch {}
   }
 
-  const isMobileClient = req.headers['x-client-type'] === 'mobile';
-  const isWebGuest = !req.user && !isMobileClient;
+  const clientType = req.headers['x-client-type'];
+  const isWebGuest = clientType === 'web' && !req.user;
 
   if (isWebGuest) {
     // Web guest: apply per-IP daily limit instead of auth
@@ -223,13 +223,14 @@ async function authMiddleware(req, res, next) {
     return next();
   }
 
-  // Mobile path: require auth when REQUIRE_AUTH=true
-  if (isMobileClient && requireAuth && !req.user) {
+  // All other clients (mobile, API, test suite) require auth when requireAuth is true
+  if (requireAuth && !req.user) {
     return res.status(401).json({ error: 'Authentication required. Please sign in to use VoicePad AI.', requestId: req.requestId });
   }
 
   next();
 }
+
 
 
 app.get('/models', async (_req, res) => {
@@ -556,9 +557,18 @@ app.post('/transcribe', authMiddleware, rateLimitMiddleware, idempotencyMiddlewa
   if (!audioBuffer || audioBuffer.length === 0) {
     return res.status(400).json({ error: 'Audio file or base64 data is required.' });
   }
+  if (req.isWebGuest && audioBuffer.length > 25 * 1024 * 1024) {
+    return res.status(429).json({
+      error: 'Web preview recordings are limited to 10 minutes. Download the VoicePad Android APK for unlimited recording length.',
+      upgradeUrl: process.env.APK_DOWNLOAD_URL || null,
+      limitReached: true,
+      requestId: req.requestId,
+    });
+  }
   if (audioBuffer.length > maxFileSize) {
     return res.status(413).json({ error: `Audio file is larger than ${Math.round(maxFileSize / (1024 * 1024))} MB.` });
   }
+
 
   // 1. Primary: Groq Whisper models across all configured Groq keys
   const models = [
