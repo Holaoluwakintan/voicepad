@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, type ChangeEvent } from "react";
 import {
   ArrowDownRight, ArrowRight, AudioLines, Check, ChevronDown, CircleHelp,
-  Command, FileText, Lightbulb, Menu, Mic, MoreHorizontal, Pause, Play,
+  Command, Download, FileText, Lightbulb, Menu, Mic, MoreHorizontal, Pause, Play,
   Search, Sparkles, Star, Tags, Upload, WandSparkles, X, Zap,
 } from "lucide-react";
 import AuthDialog from "../components/AuthDialog";
@@ -11,17 +11,23 @@ import { displayName, getAuthHeaders, supabase } from "../lib/supabase";
 import type { User } from "@supabase/supabase-js";
 
 const API_URL = (import.meta.env.VITE_TRANSCRIPTION_API_URL?.trim() || "https://voicepad-transcription.onrender.com").replace(/\/$/, "");
+const APK_URL = import.meta.env.VITE_APK_DOWNLOAD_URL?.trim() || "https://github.com/Holaoluwakintan/voicepad/releases/latest/download/voicepad.apk";
+// 10 minutes = 600 seconds — web preview hard cap
+const WEB_PREVIEW_LIMIT_SECONDS = 600;
+
+
 const notes = [
   { title: "Q4 launch notes", tag: "Work", time: "Today, 10:42 AM", color: "coral" },
   { title: "Ideas for the studio", tag: "Personal", time: "Yesterday", color: "violet" },
   { title: "Grocery list", tag: "Life admin", time: "Sep 14", color: "yellow" },
 ];
 const faqs = [
-  ["Does VoicePad work on my phone?", "Yes. VoicePad is designed to move with you across the devices you already use. Capture on mobile, then pick up your organized notes on the web."],
-  ["What happens to my audio?", "Your recording is sent securely to VoicePad’s transcription service when you choose to transcribe it. We do not expose provider keys in the browser."],
-  ["Can I upload an existing recording?", "Yes. Upload MP3, M4A, WAV, OGG, WEBM, AAC, or FLAC files up to 100 MB and VoicePad will turn them into text."],
-  ["Is VoicePad free right now?", "Yes. Voice transcription is currently free while we are in beta. Paid plans will be introduced later with higher limits and advanced AI features."],
+  ["Does VoicePad work on my phone?", "Yes. Download the free Android APK directly from this page for the full unlimited experience — no Play Store needed."],
+  ["What happens to my audio?", "Your recording is sent securely to VoicePad's transcription service. We never store your audio after transcription and do not expose provider keys in the browser."],
+  ["Can I upload an existing recording?", "Yes. Upload MP3, M4A, WAV, OGG, WEBM, AAC, or FLAC files up to 100 MB. The web preview is limited to 10 minutes — download the APK for unlimited length."],
+  ["Is VoicePad free right now?", "Yes. The web version gives you up to 10 free transcriptions per day as a preview. The Android APK is fully free with no daily cap during beta."],
 ];
+
 
 function Logo({ inverted = false }: { inverted?: boolean }) {
   return <a href="#top" className={`brand ${inverted ? "brand-inverted" : ""}`} aria-label="VoicePad home"><span className="brand-mark"><span /><span /><span /></span><span>voicepad</span></a>;
@@ -58,17 +64,32 @@ export default function Home() {
   const [category, setCategory] = useState<Category>("Personal");
   const [summary, setSummary] = useState("");
   const [summaryBusy, setSummaryBusy] = useState(false);
+  const [showApkModal, setShowApkModal] = useState(false);
+  const [apkModalReason, setApkModalReason] = useState<"limit_exceeded" | "recording_too_long">("limit_exceeded");
   const mediaRecorder = useRef<MediaRecorder | null>(null);
   const audioChunks = useRef<Blob[]>([]);
   const audioUrl = useRef<string | null>(null);
   const audioPlayer = useRef<HTMLAudioElement | null>(null);
   const fileInput = useRef<HTMLInputElement | null>(null);
 
+  // Increment timer every second while recording
   useEffect(() => {
     if (!recording) return;
     const interval = window.setInterval(() => setSeconds((value) => value + 1), 1000);
     return () => window.clearInterval(interval);
   }, [recording]);
+
+  // Auto-stop at WEB_PREVIEW_LIMIT_SECONDS and show the APK modal
+  useEffect(() => {
+    if (recording && seconds >= WEB_PREVIEW_LIMIT_SECONDS) {
+      mediaRecorder.current?.stop();
+      setRecording(false);
+      setStatus("transcribing");
+      setApkModalReason("recording_too_long");
+      setShowApkModal(true);
+    }
+  }, [seconds, recording]);
+
   useEffect(() => () => { if (audioUrl.current) URL.revokeObjectURL(audioUrl.current); }, []);
   useEffect(() => {
     if (!supabase) return;
@@ -139,8 +160,19 @@ export default function Home() {
     form.append("file", blob, filename);
     form.append("mode", "english");
     try {
-      const response = await fetch(`${API_URL}/transcribe`, { method: "POST", headers: { "Idempotency-Key": `transcribe-${filename}-${Date.now()}`, ...await getAuthHeaders() }, body: form });
+      const response = await fetch(`${API_URL}/transcribe`, {
+        method: "POST",
+        headers: { "Idempotency-Key": `transcribe-${filename}-${Date.now()}`, ...await getAuthHeaders() },
+        body: form,
+      });
       const payload = await response.json().catch(() => null);
+      // Server signals web guest daily limit reached
+      if (response.status === 429 && payload?.limitReached) {
+        setStatus("idle");
+        setApkModalReason("limit_exceeded");
+        setShowApkModal(true);
+        return;
+      }
       if (!response.ok) throw new Error(payload?.error || `Transcription failed (${response.status})`);
       if (!payload?.text) throw new Error("The service returned an empty transcript.");
       const cleanText = payload.text.trim();
@@ -169,25 +201,51 @@ export default function Home() {
         if (audioPlayer.current) audioPlayer.current.src = audioUrl.current;
         void transcribe(blob, `voicepad-${Date.now()}.webm`);
       };
-      recorder.start(); mediaRecorder.current = recorder; setRecording(true); setStatus("recording"); setSeconds(0); notify("Listening. Speak naturally — VoicePad will handle the rest.");
+      recorder.start(); mediaRecorder.current = recorder; setRecording(true); setStatus("recording"); setSeconds(0);
+      notify("Listening. Web preview is limited to 10 minutes — download the APK for unlimited recording.");
     } catch { setStatus("error"); setError("Microphone access is needed to record. You can allow it in your browser settings or upload a file instead."); }
   };
   const toggleRecording = () => recording ? stopRecording() : void startRecording();
+
   const handleUpload = (event: ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
     if (!file) return;
     if (file.size > 100 * 1024 * 1024) { setStatus("error"); setError("That file is larger than 100MB. Choose a shorter recording and try again."); return; }
-    if (audioUrl.current) URL.revokeObjectURL(audioUrl.current);
-    audioUrl.current = URL.createObjectURL(file);
-    if (audioPlayer.current) audioPlayer.current.src = audioUrl.current;
-    void transcribe(file, file.name);
+    // Check duration using a temporary audio element before uploading
+    const tempAudio = document.createElement("audio");
+    const objectUrl = URL.createObjectURL(file);
+    tempAudio.preload = "metadata";
+    tempAudio.onloadedmetadata = () => {
+      URL.revokeObjectURL(objectUrl);
+      if (tempAudio.duration > WEB_PREVIEW_LIMIT_SECONDS) {
+        setApkModalReason("recording_too_long");
+        setShowApkModal(true);
+        event.target.value = "";
+        return;
+      }
+      if (audioUrl.current) URL.revokeObjectURL(audioUrl.current);
+      audioUrl.current = URL.createObjectURL(file);
+      if (audioPlayer.current) audioPlayer.current.src = audioUrl.current;
+      void transcribe(file, file.name);
+    };
+    tempAudio.onerror = () => {
+      // Can't read duration — proceed anyway and let the server cap it
+      URL.revokeObjectURL(objectUrl);
+      if (audioUrl.current) URL.revokeObjectURL(audioUrl.current);
+      audioUrl.current = URL.createObjectURL(file);
+      if (audioPlayer.current) audioPlayer.current.src = audioUrl.current;
+      void transcribe(file, file.name);
+    };
+    tempAudio.src = objectUrl;
     event.target.value = "";
   };
+
   const togglePlayback = () => {
     if (!audioPlayer.current) return;
     if (isPlaying) { audioPlayer.current.pause(); setIsPlaying(false); } else { void audioPlayer.current.play(); setIsPlaying(true); }
   };
   const copyTranscript = async () => { if (!transcript) return; await navigator.clipboard?.writeText(transcript); notify("Transcript copied to clipboard."); };
+
 
   return <div className="site-shell" id="top">
     {toast && <div className="toast"><span className="toast-dot" />{toast}</div>}
@@ -211,5 +269,29 @@ export default function Home() {
     <section className="section faq-section" id="faq"><div className="container faq-grid"><div><div className="eyebrow"><span className="eyebrow-dot" /> Questions, answered</div><h2>Good to know.<br /><em>Before you begin.</em></h2><p>Still curious? <button onClick={() => notify("Email support is coming soon.")}>Say hello to our team <ArrowRight size={14} /></button></p></div><div className="faq-list">{faqs.map(([question, answer], index) => <div className={`faq-item ${activeFaq === index ? "faq-open" : ""}`} key={question}><button className="faq-question" onClick={() => setActiveFaq(activeFaq === index ? null : index)}><span>{question}</span><span className="faq-icon">{activeFaq === index ? <X size={15} /> : <span className="plus-icon">+</span>}</span></button>{activeFaq === index && <p className="faq-answer">{answer}</p>}</div>)}</div></div></section>
     <footer className="site-footer"><div className="container footer-top"><div><Logo /><p>A softer place for your<br />loudest thoughts.</p></div><div className="footer-links"><div><span>Explore</span><button onClick={() => scrollTo("how-it-works")}>How it works</button><button onClick={() => scrollTo("pricing")}>Pricing</button><button onClick={() => scrollTo("faq")}>FAQ</button></div><div><span>Follow along</span><button onClick={() => notify("Instagram link coming soon.")}>Instagram</button><button onClick={() => notify("X link coming soon.")}>X / Twitter</button><button onClick={() => notify("Email link coming soon.")}>Contact</button></div></div></div><div className="container footer-bottom"><span>© 2026 VoicePad, Inc.</span><span>Free transcription during beta.</span><span>Privacy · Terms</span></div></footer>
     {authOpen && <AuthDialog onClose={() => setAuthOpen(false)} onAuthed={() => { setAuthOpen(false); notify("Welcome to VoicePad. Your future transcripts will be saved."); }} />}
+
+    {/* APK Upgrade Modal */}
+    {showApkModal && (
+      <div className="modal-backdrop" role="dialog" aria-modal="true" aria-labelledby="apk-modal-title">
+        <div className="modal-card apk-modal">
+          <button className="modal-close" onClick={() => setShowApkModal(false)} aria-label="Close"><X size={18} /></button>
+          <div className="apk-modal-icon">📱</div>
+          <h2 id="apk-modal-title">
+            {apkModalReason === "recording_too_long"
+              ? "10-Minute Web Preview Limit Reached"
+              : "Daily Preview Limit Reached"}
+          </h2>
+          <p>
+            {apkModalReason === "recording_too_long"
+              ? "The web version supports up to 10 minutes of audio per recording. For unlimited recording length, meetings, lectures, and full offline access — download the free VoicePad Android APK."
+              : "You've used all 10 free daily web transcriptions. The Android APK has no daily cap during beta."}
+          </p>
+          <a className="button button-coral apk-modal-btn" href={APK_URL} download aria-label="Download VoicePad Android APK">
+            <Download size={16} /> Download Android APK — Free
+          </a>
+          <button className="text-button" onClick={() => setShowApkModal(false)}>Continue with web preview</button>
+        </div>
+      </div>
+    )}
   </div>;
 }

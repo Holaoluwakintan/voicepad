@@ -1,17 +1,28 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { Platform, StyleSheet, View } from 'react-native';
+import { Platform, Pressable, StyleSheet, Text, View } from 'react-native';
 import { useEffect, useState } from 'react';
+import { useAuth } from '@/lib/auth';
 
 const TERMS_KEY = '@voicepad/terms_accepted_v1';
 
+/**
+ * AdMobBanner
+ * - Hides completely when user has `is_pro: true` in Supabase user_metadata.
+ * - Shows a native AdMob banner for free (consented) users on native builds.
+ * - Shows a small "Remove ads" nudge below the banner so users know how to upgrade.
+ * - Does nothing on web (AdSense is handled separately in the web build).
+ */
 export function AdMobBanner() {
   const [consented, setConsented] = useState(false);
+  const { user } = useAuth();
 
   useEffect(() => {
     AsyncStorage.getItem(TERMS_KEY).then((value) => setConsented(value === 'true'));
   }, []);
 
-  if (Platform.OS === 'web' || !consented) return null;
+  // Pro users never see ads
+  const isPro = Boolean(user?.user_metadata?.is_pro);
+  if (isPro || Platform.OS === 'web' || !consented) return null;
 
   // Keep Expo Go and web builds safe: the native module is only required on a native build.
   // Production builds must provide EXPO_PUBLIC_ADMOB_BANNER_ID; development uses Google's test ID.
@@ -35,6 +46,17 @@ export function AdMobBanner() {
   return (
     <View style={styles.container} accessibilityLabel="Advertisement">
       <BannerAd unitId={unitId} size={bannerSize} />
+      <Pressable
+        style={styles.removeAdsBtn}
+        onPress={() => {
+          // TODO: navigate to Pro upgrade screen or show subscription modal
+          // router.push('/upgrade')
+        }}
+        accessibilityLabel="Remove ads by going Pro"
+        accessibilityRole="button"
+      >
+        <Text style={styles.removeAdsText}>✨ Remove ads — Go Pro</Text>
+      </Pressable>
     </View>
   );
 }
@@ -42,7 +64,18 @@ export function AdMobBanner() {
 const styles = StyleSheet.create({
   container: {
     alignItems: 'center',
-    minHeight: 50,
-    paddingVertical: 8,
+    paddingVertical: 4,
+  },
+  removeAdsBtn: {
+    marginTop: 4,
+    paddingVertical: 4,
+    paddingHorizontal: 10,
+  },
+  removeAdsText: {
+    color: '#6D5DFB',
+    fontSize: 11,
+    fontWeight: '600',
+    textDecorationLine: 'underline',
   },
 });
+

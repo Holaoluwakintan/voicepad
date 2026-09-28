@@ -5,13 +5,6 @@ import crypto from 'node:crypto';
 import cors from 'cors';
 import express from 'express';
 import multer from 'multer';
-// Security & utilities
-import helmet from 'helmet';
-import csurf from 'csurf';
-import Redis from 'ioredis';
-import pino from 'pino';
-import pinoHttp from 'pino-http';
-import { z } from 'zod';
 
 if (typeof process.loadEnvFile === 'function') {
   try { process.loadEnvFile(); } catch {}
@@ -21,28 +14,11 @@ if (typeof process.loadEnvFile === 'function') {
 const app = express();
 app.set('trust proxy', 1);
 
-// --------------------
-//  Logger configuration
-// --------------------
-const logger = pino({ level: process.env.LOG_LEVEL || 'info' });
-app.use(pinoHttp({ logger }));
-
-// --------------------
-//  Security middlewares
-// --------------------
-app.use(helmet());
-// CORS will be configured later (see lines 31‑40)
-
-// --------------------
-//  Redis client (required for rate‑limiting & idempotency)
-// --------------------
-const redis = new Redis(process.env.REDIS_URL);
-
 const port = Number(process.env.PORT ?? 8787);
-// Groq's Whisper endpoint hard‑caps uploads at 25 MB (their limit, not ours), but Deepgram
+// Groq's Whisper endpoint hard-caps uploads at 25MB (their limit, not ours), but Deepgram
 // happily accepts much larger files. So the server itself accepts bigger recordings and
-// decides per‑request which provider to use, instead of rejecting long recordings outright.
-const maxFileSize = 100 * 1024 * 1024; // 100 MB ceiling for a single recording
+// decides per-request which provider to use, instead of rejecting long recordings outright.
+const maxFileSize = 100 * 1024 * 1024; // 100MB ceiling for a single recording
 const groqMaxFileSize = 25 * 1024 * 1024; // Groq's own hard limit, do not raise this
 const upload = multer({
   storage: multer.memoryStorage(),
@@ -54,6 +30,33 @@ const allowedOrigins = rawAllowedOrigins
   ? rawAllowedOrigins.split(',').map((value) => value.trim()).filter(Boolean)
   : [];
 const isProduction = process.env.NODE_ENV === 'production';
+
+// -----------------------------------------------------------------------
+//  Web Preview Guest Limit
+//  The web site gets 10 free transcriptions per IP per day (rolling 24h).
+//  The mobile app always bypasses this when it sends X-Client-Type: mobile.
+//  Signed-in users bypass this entirely via authMiddleware.
+// -----------------------------------------------------------------------
+const WEB_GUEST_DAILY_LIMIT = Number(process.env.WEB_GUEST_DAILY_LIMIT ?? 10);
+const webGuestUsage = new Map(); // ip -> [timestamp, ...]
+// Clean stale entries once per hour
+setInterval(() => {
+  const cutoff = Date.now() - 24 * 60 * 60_000;
+  for (const [ip, timestamps] of webGuestUsage.entries()) {
+    const fresh = timestamps.filter((t) => t > cutoff);
+    if (fresh.length === 0) webGuestUsage.delete(ip);
+    else webGuestUsage.set(ip, fresh);
+  }
+}, 60 * 60_000).unref?.();
+
+function isWebGuestLimited(ip) {
+  const cutoff = Date.now() - 24 * 60 * 60_000;
+  const recent = (webGuestUsage.get(ip) ?? []).filter((t) => t > cutoff);
+  if (recent.length >= WEB_GUEST_DAILY_LIMIT) return true;
+  recent.push(Date.now());
+  webGuestUsage.set(ip, recent);
+  return false;
+}
 const requestsByIp = new Map();
 const requestsByUser = new Map();
 const idempotencyResponses = new Map();
@@ -89,7 +92,10 @@ app.use(express.json({ limit: '135mb' }));
 app.use(express.urlencoded({ extended: true, limit: '135mb' }));
 app.use(cors({
   origin(origin, callback) {
-    if (!origin || (allowedOrigins.length > 0 && (allowedOrigins.includes('*') || allowedOrigins.includes(origin)))) {
+    // When ALLOWED_ORIGINS is not set, allow all origins (web demo mode).
+    // In production, set ALLOWED_ORIGINS on Render to restrict to your domains.
+    if (!allowedOrigins.length || !origin) return callback(null, true);
+    if (allowedOrigins.includes('*') || allowedOrigins.includes(origin)) {
       return callback(null, true);
     }
     return callback(new Error('Origin is not allowed by VoicePad CORS policy'));
@@ -182,31 +188,49 @@ app.get('/terms', (_req, res) => res.type('html').send(renderLegalHtml('Terms of
 
 const supabaseUrl = (process.env.SUPABASE_URL ?? process.env.EXPO_PUBLIC_SUPABASE_URL ?? '').trim();
 const supabaseAnonKey = (process.env.SUPABASE_ANON_KEY ?? process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY ?? '').trim();
-// Require authentication in production by default; guest mode must be an explicit opt-out.
+// Mobile app always sets X-Client-Type: mobile.
+// Web demo guests do NOT send this header → they get the guest daily limit instead.
+// requireAuth only blocks the mobile path when set to true.
 const requireAuth = process.env.REQUIRE_AUTH === 'true' || (isProduction && process.env.REQUIRE_AUTH !== 'false');
 
 async function authMiddleware(req, res, next) {
+  // Try to verify the Bearer token if present (applies to both web signed-in and mobile)
   const authHeader = req.headers.authorization;
   if (authHeader && authHeader.startsWith('Bearer ') && supabaseUrl) {
     try {
       const resp = await fetch(`${supabaseUrl}/auth/v1/user`, {
-        headers: {
-          Authorization: authHeader,
-          apikey: supabaseAnonKey,
-        },
+        headers: { Authorization: authHeader, apikey: supabaseAnonKey },
       });
-      if (resp.ok) {
-        req.user = await resp.json();
-      }
+      if (resp.ok) req.user = await resp.json();
     } catch {}
   }
 
-  if (requireAuth && !req.user) {
+  const isMobileClient = req.headers['x-client-type'] === 'mobile';
+  const isWebGuest = !req.user && !isMobileClient;
+
+  if (isWebGuest) {
+    // Web guest: apply per-IP daily limit instead of auth
+    if (isWebGuestLimited(req.ip)) {
+      return res.status(429).json({
+        error: 'You have reached the 10-transcription daily web preview limit. Download the VoicePad Android APK for unlimited access.',
+        upgradeUrl: process.env.APK_DOWNLOAD_URL || null,
+        limitReached: true,
+        requestId: req.requestId,
+      });
+    }
+    // Mark as guest so downstream handlers can differentiate
+    req.isWebGuest = true;
+    return next();
+  }
+
+  // Mobile path: require auth when REQUIRE_AUTH=true
+  if (isMobileClient && requireAuth && !req.user) {
     return res.status(401).json({ error: 'Authentication required. Please sign in to use VoicePad AI.', requestId: req.requestId });
   }
 
   next();
 }
+
 
 app.get('/models', async (_req, res) => {
   if (!process.env.GROQ_API_KEY && groqKeys.length === 0) return res.status(500).json({ error: 'GROQ_API_KEY is not configured on the server.' });

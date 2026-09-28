@@ -164,3 +164,15 @@ a { color: inherit; text-decoration: none; }
 .ad-consent button { border: 0; border-radius: 999px; padding: 8px 14px; background: #24201f; color: #fff; cursor: pointer; font: inherit; font-weight: 700; }
 .ad-consent .ad-consent-secondary { background: transparent; color: #687384; border: 1px solid #d8dee8; }
 @media (max-width: 640px) { .ad-consent { align-items: flex-start; flex-direction: column; gap: 10px; } }
+
+/* APK Upgrade Modal */
+.modal-backdrop { align-items: center; background: rgba(21,18,17,.72); bottom: 0; display: flex; justify-content: center; left: 0; padding: 20px; position: fixed; right: 0; top: 0; z-index: 100; }
+.modal-card { background: var(--white); border-radius: 20px; box-shadow: 0 40px 120px rgba(0,0,0,.36); max-width: 440px; padding: 44px 40px 36px; position: relative; text-align: center; width: 100%; }
+.modal-close { align-items: center; background: transparent; border: 1px solid var(--line); border-radius: 50%; color: var(--ink-soft); cursor: pointer; display: flex; height: 30px; justify-content: center; padding: 0; position: absolute; right: 16px; top: 16px; width: 30px; transition: background .15s; }
+.modal-close:hover { background: var(--paper-deep); }
+.apk-modal-icon { font-size: 44px; line-height: 1; margin-bottom: 16px; }
+.apk-modal h2 { font-size: 22px; font-weight: 800; letter-spacing: -.04em; margin: 0 0 12px; }
+.apk-modal p { color: var(--ink-soft); font-size: 14px; line-height: 1.65; margin: 0 0 24px; }
+.apk-modal-btn { align-items: center; display: inline-flex; gap: 8px; justify-content: center; margin-bottom: 14px; width: 100%; }
+.apk-modal .text-button { color: var(--ink-soft); font-size: 13px; }
+@media (max-width: 480px) { .modal-card { padding: 36px 24px 28px; } .apk-modal h2 { font-size: 19px; } }

@@ -55,3 +55,7 @@ services:
         sync: false
       - key: DEEPGRAM_API_KEYS
         sync: false
+      - key: APK_DOWNLOAD_URL
+        sync: false
+      - key: WEB_GUEST_DAILY_LIMIT
+        value: "10"
