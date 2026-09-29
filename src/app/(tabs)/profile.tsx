@@ -3,7 +3,7 @@
  * Fixed: wrapped in ScrollView (was overflowing on small screens).
  * Premium: glass-effect stat cards, gradient avatar ring, polished auth card.
  */
-import { useFocusEffect } from 'expo-router';
+import { useFocusEffect, useRouter } from 'expo-router';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   ActivityIndicator,
@@ -31,6 +31,7 @@ import { DS } from '@/constants/design';
 import Constants from 'expo-constants';
 
 export default function ProfileScreen() {
+  const router = useRouter();
   const {
     user,
     loading: authLoading,
@@ -244,6 +245,27 @@ export default function ProfileScreen() {
             <StatCard value={String(ready)} label="Transcribed" icon="✅" />
             <StatCard value={String(pending)} label="In progress" icon="⏳" />
           </View>
+
+          {/* ─── Pro Membership Card ─── */}
+          <Pressable
+            onPress={() => router.push('/upgrade')}
+            style={styles.proUpgradeBanner}
+            accessibilityRole="button"
+            accessibilityLabel="VoicePad Pro subscription"
+          >
+            <ThemedText style={styles.proCrownIcon}>✨</ThemedText>
+            <View style={{ flex: 1, marginLeft: 12 }}>
+              <ThemedText style={styles.proBannerTitle}>
+                {user?.user_metadata?.is_pro ? 'VoicePad Pro Active' : 'Upgrade to VoicePad Pro'}
+              </ThemedText>
+              <ThemedText style={styles.proBannerSub}>
+                {user?.user_metadata?.is_pro
+                  ? 'Manage your active plan and cloud sync'
+                  : 'Remove ads, unlock unlimited AI notes & priority models'}
+              </ThemedText>
+            </View>
+            <ThemedText style={styles.proBannerArrow}>›</ThemedText>
+          </Pressable>
 
           {/* ─── Cloud not configured notice ─── */}
           {!configured && (
@@ -590,6 +612,38 @@ const styles = StyleSheet.create({
   statIcon: { fontSize: 20 },
   statValue: { color: DS.colors.primary, fontSize: DS.font.h2, fontWeight: '800' },
   statLabel: { color: DS.colors.muted, fontSize: DS.font.caption, textAlign: 'center' },
+
+  proUpgradeBanner: {
+    backgroundColor: DS.colors.primaryLight,
+    borderWidth: 1.5,
+    borderColor: DS.colors.primary,
+    borderRadius: DS.radius.lg,
+    padding: 16,
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 20,
+    ...DS.shadow.primary,
+  },
+  proCrownIcon: {
+    fontSize: 26,
+  },
+  proBannerTitle: {
+    color: DS.colors.ink,
+    fontSize: DS.font.bodyMd,
+    fontWeight: '800',
+  },
+  proBannerSub: {
+    color: DS.colors.muted,
+    fontSize: DS.font.xs,
+    marginTop: 2,
+    lineHeight: 16,
+  },
+  proBannerArrow: {
+    color: DS.colors.primary,
+    fontSize: 24,
+    fontWeight: '700',
+    marginLeft: 8,
+  },
 
   // Notice card
   noticeCard: {

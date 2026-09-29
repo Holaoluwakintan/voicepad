@@ -91,6 +91,7 @@ export default function RecordScreen() {
   const [selectedLanguage, setSelectedLanguage] = useState<LangCode>('auto');
   const [transcribingMsg, setTranscribingMsg] = useState('Sending to AI…');
   const [showLangPicker, setShowLangPicker] = useState(false);
+  const [isPaused, setIsPaused] = useState(false);
 
   // Pulse animation
   const pulseScale = useSharedValue(1);
@@ -152,12 +153,72 @@ export default function RecordScreen() {
       await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Heavy);
       await recorder.prepareToRecordAsync();
       recorder.record();
+      setIsPaused(false);
     } catch {
       Alert.alert('Could not start recording', 'Please try again.');
     }
   }
 
+  async function pause() {
+    try {
+      await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+      if (recorder.pause) {
+        await recorder.pause();
+      }
+      setIsPaused(true);
+    } catch (err) {
+      console.warn('Could not pause recording:', err);
+    }
+  }
+
+  async function resume() {
+    try {
+      await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+      if (recorder.record) {
+        await recorder.record();
+      }
+      setIsPaused(false);
+    } catch (err) {
+      console.warn('Could not resume recording:', err);
+    }
+  }
+
+  function handleClosePress() {
+    if (isRecording || isPaused) {
+      Alert.alert(
+        'Discard Recording?',
+        'You have a recording in progress. If you leave now, this recording will be discarded.',
+        [
+          { text: 'Keep Recording', style: 'cancel' },
+          {
+            text: 'Discard & Exit',
+            style: 'destructive',
+            onPress: async () => {
+              try { await recorder.stop(); } catch {}
+              setIsPaused(false);
+              router.back();
+            },
+          },
+        ]
+      );
+      return;
+    }
+    if (transcriptState === 'transcribing') {
+      Alert.alert(
+        'Transcription in Progress',
+        'Your recording has been saved safely. VoicePad will continue transcribing in the background.',
+        [
+          { text: 'Keep Waiting', style: 'cancel' },
+          { text: 'Return to Notes', onPress: () => router.replace('/(tabs)') },
+        ]
+      );
+      return;
+    }
+    router.back();
+  }
+
   async function stop() {
+    setIsPaused(false);
     try {
       setTranscriptState('saving');
       await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
@@ -331,7 +392,8 @@ export default function RecordScreen() {
   const time = `${String(mins).padStart(2, '0')}:${String(secs).padStart(2, '0')}`;
 
   const statusLabel =
-    isRecording ? 'Recording in progress…'
+    isPaused ? 'Recording paused ⏸'
+    : isRecording ? 'Recording in progress…'
     : transcriptState === 'saving' ? 'Saving audio…'
     : transcriptState === 'transcribing' ? transcribingMsg
     : transcriptState === 'ready' ? 'Transcription complete ✓'
@@ -339,7 +401,7 @@ export default function RecordScreen() {
     : permission === 'denied' ? 'Microphone unavailable'
     : 'Ready when you are';
 
-  const isIdle = transcriptState === 'idle' && !savedUri && !isRecording;
+  const isIdle = transcriptState === 'idle' && !savedUri && !isRecording && !isPaused;
   const isDone = transcriptState === 'ready' || transcriptState === 'failed';
 
   return (
@@ -353,9 +415,10 @@ export default function RecordScreen() {
           {/* Header */}
           <View style={styles.header}>
             <Pressable
-              onPress={() => router.back()}
+              onPress={handleClosePress}
               style={styles.closeBtn}
               accessibilityLabel="Close recorder"
+              accessibilityRole="button"
             >
               <ThemedText style={styles.closeBtnText}>×</ThemedText>
             </Pressable>
@@ -368,11 +431,11 @@ export default function RecordScreen() {
           {/* Status + Timer */}
           <View style={styles.center}>
             <ThemedText style={styles.status}>{statusLabel}</ThemedText>
-            <ThemedText style={[styles.timer, isRecording && styles.timerRecording]}>
+            <ThemedText style={[styles.timer, isRecording && styles.timerRecording, isPaused && styles.timerPaused]}>
               {time}
             </ThemedText>
             <AudioWaveform
-              isRecording={isRecording}
+              isRecording={isRecording && !isPaused}
               metering={recorderState.metering}
               height={90}
             />
@@ -390,7 +453,7 @@ export default function RecordScreen() {
             <View style={styles.transcriptBox}>
               <View style={styles.transcriptHeader}>
                 <ThemedText style={styles.transcriptLabel}>📝 Transcript</ThemedText>
-                <Pressable onPress={copyTranscript} style={styles.copyBtn}>
+                <Pressable onPress={copyTranscript} style={styles.copyBtn} accessibilityRole="button">
                   <ThemedText style={styles.copyBtnText}>
                     {copied ? '✓ Copied!' : '📋 Copy'}
                   </ThemedText>
@@ -408,10 +471,28 @@ export default function RecordScreen() {
                   Connecting to AI service. (If the server is waking up, this may take ~30s).
                 </ThemedText>
               </ThemedText>
+              <Pressable
+                onPress={() => router.replace('/(tabs)')}
+                style={styles.bgContinueBtn}
+                accessibilityRole="button"
+                accessibilityLabel="Return to notes feed"
+              >
+                <ThemedText style={styles.bgContinueBtnText}>➔ Return to Notes (transcribes in background)</ThemedText>
+              </Pressable>
             </View>
           ) : transcriptState === 'failed' ? (
             <View style={styles.errorBox}>
               <ThemedText style={styles.errorText}>⚠️ {transcriptError || 'Transcription failed.'}</ThemedText>
+              {transcriptError.includes('Sign in') && (
+                <Pressable
+                  onPress={() => router.push('/(tabs)/profile')}
+                  style={styles.signInToRetryBtn}
+                  accessibilityRole="button"
+                  accessibilityLabel="Sign in to your account"
+                >
+                  <ThemedText style={styles.signInToRetryBtnText}>🔑  Sign In to Transcribe</ThemedText>
+                </Pressable>
+              )}
             </View>
           ) : null}
 
@@ -420,6 +501,27 @@ export default function RecordScreen() {
             {/* Idle: Record button + Upload button */}
             {isIdle && (
               <View style={styles.idleControls}>
+                {/* Guest Mode notice banner */}
+                {!user && (
+                  <View style={styles.authNoticeCard}>
+                    <ThemedText style={styles.authNoticeIcon}>🔒</ThemedText>
+                    <View style={styles.authNoticeContent}>
+                      <ThemedText style={styles.authNoticeTitle}>Guest Mode</ThemedText>
+                      <ThemedText style={styles.authNoticeSub}>
+                        Sign in to enable AI cloud transcription & sync. Audio will be saved locally.
+                      </ThemedText>
+                    </View>
+                    <Pressable
+                      onPress={() => router.push('/(tabs)/profile')}
+                      style={styles.authNoticeBtn}
+                      accessibilityRole="button"
+                      accessibilityLabel="Sign in"
+                    >
+                      <ThemedText style={styles.authNoticeBtnText}>Sign In</ThemedText>
+                    </Pressable>
+                  </View>
+                )}
+
                 {/* Language selection pills */}
                 <View style={styles.langSelectorWrapper}>
                   <ThemedText style={styles.langSelectorLabel}>Spoken Language</ThemedText>
@@ -435,6 +537,8 @@ export default function RecordScreen() {
                           key={lang.code}
                           onPress={() => setSelectedLanguage(lang.code)}
                           style={[styles.langChip, isSelected && styles.langChipActive]}
+                          accessibilityRole="button"
+                          accessibilityState={{ selected: isSelected }}
                         >
                           <ThemedText style={[styles.langChipText, isSelected && styles.langChipTextActive]}>
                             {lang.label}
@@ -452,6 +556,7 @@ export default function RecordScreen() {
                     onPress={start}
                     style={({ pressed }) => [styles.recordButton, pressed && styles.pressed]}
                     accessibilityLabel="Start recording"
+                    accessibilityRole="button"
                   >
                     <View style={styles.recordDot} />
                   </Pressable>
@@ -470,6 +575,7 @@ export default function RecordScreen() {
                   onPress={pickAudioFile}
                   style={({ pressed }) => [styles.uploadBtn, pressed && styles.pressed]}
                   accessibilityLabel="Upload audio file to transcribe"
+                  accessibilityRole="button"
                 >
                   <ThemedText style={styles.uploadBtnText}>📁  Upload Audio File</ThemedText>
                   <ThemedText style={styles.uploadBtnSub}>
@@ -479,23 +585,40 @@ export default function RecordScreen() {
               </View>
             )}
 
-            {/* Stop button while recording */}
-            {isRecording && (
-              <View style={styles.recordButtonWrapper}>
-                <Animated.View style={[styles.pulseRing, pulseStyle]} pointerEvents="none" />
+            {/* Active recording controls with Pause & Resume */}
+            {(isRecording || isPaused) && (
+              <View style={styles.activeRecordingControls}>
+                <View style={styles.recordButtonWrapper}>
+                  <Animated.View style={[styles.pulseRing, pulseStyle, isPaused && { opacity: 0 }]} pointerEvents="none" />
+                  <Pressable
+                    onPress={stop}
+                    style={({ pressed }) => [styles.recordButton, pressed && styles.pressed]}
+                    accessibilityLabel="Stop recording"
+                    accessibilityRole="button"
+                  >
+                    <View style={styles.stopSquare} />
+                  </Pressable>
+                </View>
+                <ThemedText style={styles.hint}>
+                  {isPaused ? 'Paused · Tap Stop to save or Resume' : 'Tap Stop to save recording'}
+                </ThemedText>
+
+                {/* Pause / Resume button */}
                 <Pressable
-                  onPress={stop}
-                  style={({ pressed }) => [styles.recordButton, pressed && styles.pressed]}
-                  accessibilityLabel="Stop recording"
+                  onPress={isPaused ? resume : pause}
+                  style={({ pressed }) => [styles.pauseResumeBtn, pressed && styles.pressed]}
+                  accessibilityRole="button"
+                  accessibilityLabel={isPaused ? 'Resume recording' : 'Pause recording'}
                 >
-                  <View style={styles.stopSquare} />
+                  <ThemedText style={styles.pauseResumeBtnText}>
+                    {isPaused ? '▶  Resume Recording' : '⏸  Pause Recording'}
+                  </ThemedText>
                 </Pressable>
-                <ThemedText style={styles.hint}>Tap to stop recording</ThemedText>
               </View>
             )}
 
             {/* Post-recording actions */}
-            {savedUri && !isRecording && transcriptState !== 'idle' && (
+            {savedUri && !isRecording && !isPaused && transcriptState !== 'idle' && (
               <View style={styles.postActions}>
                 {isDone && (
                   <>
@@ -569,6 +692,12 @@ const styles = StyleSheet.create({
   timerRecording: {
     color: '#FF7A8A',
     textShadowColor: 'rgba(239,84,114,0.45)',
+    textShadowOffset: { width: 0, height: 0 },
+    textShadowRadius: 18,
+  },
+  timerPaused: {
+    color: '#FBBF24',
+    textShadowColor: 'rgba(251,191,36,0.45)',
     textShadowOffset: { width: 0, height: 0 },
     textShadowRadius: 18,
   },
@@ -748,6 +877,77 @@ const styles = StyleSheet.create({
   openNoteBtnText: { color: '#FFF', fontSize: DS.font.h3, fontWeight: '800' },
   discardBtn: { paddingVertical: 10, paddingHorizontal: 20 },
   discardBtnText: { color: MUTED_TEXT, fontSize: DS.font.sm, fontWeight: '600' },
+
+  activeRecordingControls: {
+    width: '100%',
+    alignItems: 'center',
+  },
+  pauseResumeBtn: {
+    backgroundColor: 'rgba(255,255,255,0.12)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.22)',
+    borderRadius: DS.radius.full,
+    paddingHorizontal: 22,
+    paddingVertical: 12,
+    marginTop: 8,
+  },
+  pauseResumeBtnText: {
+    color: '#FFFFFF',
+    fontSize: DS.font.sm,
+    fontWeight: '800',
+  },
+
+  authNoticeCard: {
+    width: '100%',
+    backgroundColor: 'rgba(251,191,36,0.12)',
+    borderWidth: 1,
+    borderColor: 'rgba(251,191,36,0.3)',
+    borderRadius: DS.radius.md,
+    padding: 14,
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 20,
+    gap: 12,
+  },
+  authNoticeIcon: { fontSize: 22 },
+  authNoticeContent: { flex: 1 },
+  authNoticeTitle: { color: '#FDE68A', fontSize: DS.font.xs, fontWeight: '800' },
+  authNoticeSub: { color: '#E2E8F0', fontSize: DS.font.xxs, marginTop: 2, lineHeight: 15 },
+  authNoticeBtn: {
+    backgroundColor: '#F59E0B',
+    borderRadius: DS.radius.xs,
+    paddingHorizontal: 12,
+    paddingVertical: 7,
+  },
+  authNoticeBtnText: { color: '#000000', fontSize: DS.font.xs, fontWeight: '800' },
+
+  signInToRetryBtn: {
+    backgroundColor: DS.colors.primary,
+    borderRadius: DS.radius.md,
+    paddingVertical: 12,
+    paddingHorizontal: 18,
+    alignItems: 'center',
+    marginTop: 10,
+    ...DS.shadow.primary,
+  },
+  signInToRetryBtnText: {
+    color: '#FFFFFF',
+    fontSize: DS.font.sm,
+    fontWeight: '800',
+  },
+
+  bgContinueBtn: {
+    marginTop: 12,
+    paddingVertical: 10,
+    paddingHorizontal: 16,
+    backgroundColor: 'rgba(255,255,255,0.1)',
+    borderRadius: DS.radius.full,
+  },
+  bgContinueBtnText: {
+    color: '#E0DEFF',
+    fontSize: DS.font.xs,
+    fontWeight: '700',
+  },
 
   pressed: { opacity: 0.82, transform: [{ scale: 0.97 }] },
 });

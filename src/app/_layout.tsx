@@ -61,6 +61,7 @@ export default function RootLayout() {
           <Stack.Screen name="note/[id]" />
           <Stack.Screen name="privacy" />
           <Stack.Screen name="terms" />
+          <Stack.Screen name="upgrade" options={{ presentation: 'modal' }} />
         </Stack>
       </ThemeProvider>
     </AuthProvider>

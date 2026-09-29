@@ -2,6 +2,8 @@
 //  Imports & Core Setup
 // ====================
 import crypto from 'node:crypto';
+import fs from 'node:fs';
+import os from 'node:os';
 import cors from 'cors';
 import express from 'express';
 import multer from 'multer';
@@ -15,13 +17,12 @@ const app = express();
 app.set('trust proxy', 1);
 
 const port = Number(process.env.PORT ?? 8787);
-// Groq's Whisper endpoint hard-caps uploads at 25MB (their limit, not ours), but Deepgram
-// happily accepts much larger files. So the server itself accepts bigger recordings and
-// decides per-request which provider to use, instead of rejecting long recordings outright.
-const maxFileSize = 100 * 1024 * 1024; // 100MB ceiling for a single recording
-const groqMaxFileSize = 25 * 1024 * 1024; // Groq's own hard limit, do not raise this
+// Groq's Whisper endpoint caps uploads at 25MB, while Deepgram accepts larger.
+// 45MB accommodates ~2 hours of 48kbps voice audio while preventing RAM spikes.
+const maxFileSize = 45 * 1024 * 1024;
+const groqMaxFileSize = 25 * 1024 * 1024; // Groq's own hard limit
 const upload = multer({
-  storage: multer.memoryStorage(),
+  dest: os.tmpdir(),
   limits: { fileSize: maxFileSize },
 });
 const groqBaseUrl = process.env.GROQ_BASE_URL ?? 'https://api.groq.com/openai/v1';
@@ -87,9 +88,9 @@ setInterval(() => {
 }, 5 * 60_000).unref?.();
 
 // Base64-encoded audio (the native JSON fallback path) inflates file size by ~33%,
-// so this needs real headroom above maxFileSize, not just to match it.
-app.use(express.json({ limit: '135mb' }));
-app.use(express.urlencoded({ extended: true, limit: '135mb' }));
+// so this needs headroom above maxFileSize (45MB). 60MB safely absorbs up to ~1.8h of voice.
+app.use(express.json({ limit: '60mb' }));
+app.use(express.urlencoded({ extended: true, limit: '60mb' }));
 app.use(cors({
   origin(origin, callback) {
     // When ALLOWED_ORIGINS is not set, allow all origins (web demo mode).
@@ -537,36 +538,43 @@ app.post('/transcribe', authMiddleware, rateLimitMiddleware, idempotencyMiddlewa
   let audioBuffer = null;
   let audioMimeType = 'audio/m4a';
   let originalFilename = 'voice-note.m4a';
+  let tempDiskFile = null;
 
-  if (req.file) {
-    audioBuffer = req.file.buffer;
-    audioMimeType = req.file.mimetype || 'audio/m4a';
-    originalFilename = req.file.originalname || 'voice-note.m4a';
-  } else {
-    const rawAudio = req.body?.audio || req.body?.audioBase64 || req.body?.audio_base64 || req.body?.file || req.body?.fileBase64 || req.body?.data;
-    if (rawAudio) {
-      const raw = String(rawAudio);
-      let base64 = raw;
-      if (raw.startsWith('data:')) {
-        const match = raw.match(/^data:([^;]+);base64,(.+)$/);
-        if (match) {
-          audioMimeType = match[1];
-          base64 = match[2];
+  try {
+    if (req.file) {
+      tempDiskFile = req.file.path;
+      try {
+        audioBuffer = await fs.promises.readFile(tempDiskFile);
+      } catch (readErr) {
+        console.warn('Could not read uploaded temp file:', readErr);
+      }
+      audioMimeType = req.file.mimetype || 'audio/m4a';
+      originalFilename = req.file.originalname || 'voice-note.m4a';
+    } else {
+      const rawAudio = req.body?.audio || req.body?.audioBase64 || req.body?.audio_base64 || req.body?.file || req.body?.fileBase64 || req.body?.data;
+      if (rawAudio) {
+        const raw = String(rawAudio);
+        let base64 = raw;
+        if (raw.startsWith('data:')) {
+          const match = raw.match(/^data:([^;]+);base64,(.+)$/);
+          if (match) {
+            audioMimeType = match[1];
+            base64 = match[2];
+          }
+        }
+        try {
+          audioBuffer = Buffer.from(base64, 'base64');
+        } catch {}
+        originalFilename = req.body.filename || req.body.fileName || 'voice-note.m4a';
+        if (req.body.mimeType || req.body.contentType) {
+          audioMimeType = req.body.mimeType || req.body.contentType;
         }
       }
-      try {
-        audioBuffer = Buffer.from(base64, 'base64');
-      } catch {}
-      originalFilename = req.body.filename || req.body.fileName || 'voice-note.m4a';
-      if (req.body.mimeType || req.body.contentType) {
-        audioMimeType = req.body.mimeType || req.body.contentType;
-      }
     }
-  }
 
-  if (!audioBuffer || audioBuffer.length === 0) {
-    return res.status(400).json({ error: 'Audio file or base64 data is required.' });
-  }
+    if (!audioBuffer || audioBuffer.length === 0) {
+      return res.status(400).json({ error: 'Audio file or base64 data is required.' });
+    }
   if (req.isWebGuest && audioBuffer.length > 25 * 1024 * 1024) {
     return res.status(429).json({
       error: 'Web preview recordings are limited to 10 minutes. Download the VoicePad Android APK for unlimited recording length.',
@@ -653,7 +661,12 @@ app.post('/transcribe', authMiddleware, rateLimitMiddleware, idempotencyMiddlewa
     return res.json(geminiResult);
   }
 
-  return res.status(502).json({ error: 'Transcription provider could not process the audio. All 9 AI provider keys exhausted. Please retry.' });
+    return res.status(502).json({ error: 'Transcription provider could not process the audio. Please retry.' });
+  } finally {
+    if (tempDiskFile) {
+      fs.promises.unlink(tempDiskFile).catch(() => {});
+    }
+  }
 });
 
 app.post('/summarize', authMiddleware, rateLimitMiddleware, idempotencyMiddleware, async (req, res) => {

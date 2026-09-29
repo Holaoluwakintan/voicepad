@@ -31,8 +31,8 @@ export const DS = {
 
     // Text
     ink: '#182235',            // primary text
-    muted: '#687384',          // secondary text
-    subtle: '#9AA4B2',         // placeholder / tertiary
+    muted: '#475569',          // secondary text (WCAG AA >= 4.5:1 on light surfaces)
+    subtle: '#64748B',         // placeholder / tertiary (WCAG AA >= 4.5:1 on white)
 
     // Borders
     border: '#E1E7F0',

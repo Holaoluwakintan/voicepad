@@ -15,7 +15,7 @@ import {
   TextInput,
   View,
 } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useFocusEffect, useRouter } from 'expo-router';
 import * as Haptics from 'expo-haptics';
 import Animated, { FadeInDown } from 'react-native-reanimated';
@@ -67,6 +67,9 @@ function NoteCard({
         onPress={onPress}
         onLongPress={onLongPress}
         style={({ pressed }) => [styles.noteCard, pressed && styles.pressed]}
+        accessibilityRole="button"
+        accessibilityLabel={`Note: ${item.title || 'Untitled'}. Category: ${item.category ?? 'Personal'}. ${isFailed ? 'Transcription failed' : isPending ? 'Transcribing' : 'Ready'}`}
+        accessibilityHint="Double tap to open note details, press and hold for actions"
       >
         {/* Category left accent bar */}
         <View style={[styles.cardAccent, { backgroundColor: catData.accent }]} />
@@ -115,6 +118,7 @@ function NoteCard({
               onPress={(e) => { e.stopPropagation?.(); onRetry(); }}
               style={styles.retryChip}
               accessibilityLabel="Retry transcription"
+              accessibilityRole="button"
             >
               <ThemedText style={styles.retryChipText}>↻ Retry</ThemedText>
             </Pressable>
@@ -142,6 +146,7 @@ function NoteCard({
 
 export default function HomeScreen() {
   const router = useRouter();
+  const insets = useSafeAreaInsets();
   const { user } = useAuth();
   const [notes, setNotes] = useState<Note[]>([]);
   const [isLoading, setIsLoading] = useState(true);
@@ -359,6 +364,9 @@ export default function HomeScreen() {
                       Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
                       setFilterSource(mode);
                     }}
+                    accessibilityRole="button"
+                    accessibilityState={{ selected: filterSource === mode }}
+                    accessibilityLabel={mode === 'voice' ? `Show only voice notes, ${voiceCount} total` : `Show all notes, ${notes.length} total`}
                     style={[styles.toggleBtn, filterSource === mode && styles.toggleBtnActive]}
                   >
                     <ThemedText
@@ -381,7 +389,9 @@ export default function HomeScreen() {
                     <Pressable
                       key={cat}
                       onPress={() => handleCategorySelect(cat)}
-                      accessibilityLabel={`Filter by ${cat}`}
+                      accessibilityLabel={`Filter notes by ${cat}`}
+                      accessibilityRole="button"
+                      accessibilityState={{ selected: isActive }}
                       style={[
                         styles.chip,
                         isActive && styles.chipActive,
@@ -410,12 +420,14 @@ export default function HomeScreen() {
                   <Pressable
                     onPress={() => router.push({ pathname: '/note/record', params: { category: selectedCategory === 'All' ? 'Personal' : selectedCategory } })}
                     style={styles.emptyCta}
+                    accessibilityRole="button"
                   >
                     <ThemedText style={styles.emptyCtaText}>🎙️ Record now</ThemedText>
                   </Pressable>
                   <Pressable
                     onPress={() => router.push('/scan')}
                     style={styles.emptyCtaSecondary}
+                    accessibilityRole="button"
                   >
                     <ThemedText style={styles.emptyCtaSecondaryText}>📷 Or scan a photo</ThemedText>
                   </Pressable>
@@ -423,7 +435,7 @@ export default function HomeScreen() {
               )}
             </>
           }
-          ListFooterComponent={<View style={{ height: 120 }} />}
+          ListFooterComponent={<View style={{ height: Math.max(insets.bottom, 16) + 110 }} />}
         />
 
         {/* FAB */}
@@ -432,15 +444,23 @@ export default function HomeScreen() {
             Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium).catch(() => {});
             router.push({ pathname: '/note/record', params: { category: selectedCategory === 'All' ? 'Personal' : selectedCategory } });
           }}
-          style={({ pressed }) => [styles.fab, pressed && styles.fabPressed]}
+          style={({ pressed }) => [
+            styles.fab,
+            { bottom: Math.max(insets.bottom, 16) + 24 },
+            pressed && styles.fabPressed,
+          ]}
           accessibilityLabel="Record a voice note"
+          accessibilityRole="button"
         >
           <ThemedText style={styles.fabText}>🎙️</ThemedText>
         </Pressable>
 
         {/* Action tray (long-press) */}
         {selectedNote && (
-          <Animated.View entering={FadeInDown.duration(200)} style={styles.actionTray}>
+          <Animated.View
+            entering={FadeInDown.duration(200)}
+            style={[styles.actionTray, { bottom: Math.max(insets.bottom, 16) + 10 }]}
+          >
             <View style={styles.trayThumb}>
               <ThemedText style={styles.trayThumbText}>✦</ThemedText>
             </View>
@@ -450,13 +470,25 @@ export default function HomeScreen() {
                 setSelectedNote(null);
               }}
               style={styles.trayBtn}
+              accessibilityRole="button"
+              accessibilityLabel="Edit note"
             >
               <ThemedText style={styles.trayBtnText}>✎ Edit</ThemedText>
             </Pressable>
-            <Pressable onPress={() => deleteNote(selectedNote)} style={[styles.trayBtn, styles.trayBtnDanger]}>
+            <Pressable
+              onPress={() => deleteNote(selectedNote)}
+              style={[styles.trayBtn, styles.trayBtnDanger]}
+              accessibilityRole="button"
+              accessibilityLabel="Delete note"
+            >
               <ThemedText style={styles.trayBtnText}>🗑 Delete</ThemedText>
             </Pressable>
-            <Pressable onPress={() => setSelectedNote(null)} style={styles.trayBtnClose}>
+            <Pressable
+              onPress={() => setSelectedNote(null)}
+              style={styles.trayBtnClose}
+              accessibilityRole="button"
+              accessibilityLabel="Close actions"
+            >
               <ThemedText style={styles.trayBtnCloseText}>×</ThemedText>
             </Pressable>
           </Animated.View>

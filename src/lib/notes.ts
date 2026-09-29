@@ -12,6 +12,7 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as SQLite from 'expo-sqlite';
 import { Platform } from 'react-native';
+import * as FileSystem from 'expo-file-system';
 
 export const NOTES_STORAGE_KEY = '@voicepad/notes';
 export const NOTES_BACKUP_KEY = '@voicepad/notes-backup';
@@ -374,6 +375,18 @@ export async function updateNote(id: string, patch: Partial<Note>): Promise<Note
   return merged;
 }
 
+export async function deleteLocalAudio(uri?: string | null): Promise<void> {
+  if (!uri || Platform.OS === 'web') return;
+  try {
+    const fileInfo = await FileSystem.getInfoAsync(uri);
+    if (fileInfo.exists) {
+      await FileSystem.deleteAsync(uri, { idempotent: true });
+    }
+  } catch (err) {
+    console.warn('Could not delete local audio file:', err);
+  }
+}
+
 export async function removeNote(id: string): Promise<void> {
   if (Platform.OS === 'web') {
     return enqueueWeb(async () => {
@@ -383,9 +396,13 @@ export async function removeNote(id: string): Promise<void> {
     });
   }
   const db = await getDb();
+  const row = await db.getFirstAsync<{ audio_uri?: string }>('SELECT audio_uri FROM notes WHERE id = ?', id);
+  if (row?.audio_uri) {
+    await deleteLocalAudio(row.audio_uri);
+  }
   const now = new Date().toISOString();
   await db.runAsync(
-    'UPDATE notes SET deleted_at=?, updated_at=? WHERE id=?',
+    'UPDATE notes SET deleted_at=?, updated_at=?, audio_uri=NULL WHERE id=?',
     now, now, id
   );
 }
@@ -398,5 +415,9 @@ export async function purgeNote(id: string): Promise<void> {
     });
   }
   const db = await getDb();
+  const row = await db.getFirstAsync<{ audio_uri?: string }>('SELECT audio_uri FROM notes WHERE id = ?', id);
+  if (row?.audio_uri) {
+    await deleteLocalAudio(row.audio_uri);
+  }
   await db.runAsync('DELETE FROM notes WHERE id=?', id);
 }

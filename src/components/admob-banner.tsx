@@ -46,7 +46,7 @@ export function AdMobBanner() {
       <BannerAd unitId={unitId} size={bannerSize} />
       <Pressable
         style={styles.removeAdsBtn}
-        onPress={() => router.push('/(tabs)/profile')}
+        onPress={() => router.push('/upgrade')}
         accessibilityLabel="Remove ads by going Pro"
         accessibilityRole="button"
       >

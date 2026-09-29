@@ -8,6 +8,7 @@ import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useCallback, useEffect, useState } from 'react';
 import {
   Alert,
+  Modal,
   Pressable,
   ScrollView,
   Share,
@@ -17,6 +18,7 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import * as Haptics from 'expo-haptics';
+import * as Clipboard from 'expo-clipboard';
 
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
@@ -48,6 +50,8 @@ export default function NoteDetailScreen() {
   const [activeTab, setActiveTab] = useState<'transcript' | 'summary'>('transcript');
   const [category, setCategory] = useState<NoteCategory>('Personal');
   const [resolvedAudioSource, setResolvedAudioSource] = useState<string | null>(null);
+  const [isExportOpen, setIsExportOpen] = useState(false);
+  const [copiedFormat, setCopiedFormat] = useState<'markdown' | 'transcript' | 'summary' | null>(null);
 
   useEffect(() => {
     setAudioModeAsync({ playsInSilentMode: true }).catch(() => {});
@@ -166,19 +170,63 @@ export default function NoteDetailScreen() {
     }
   }
 
-  async function shareNote() {
+  function getMarkdownContent() {
+    if (!note) return '';
+    const noteTitle = title.trim() || note.title || 'Voice Note';
+    const noteCat = category || getNoteCategory(note);
+    const parts = [`# ${noteTitle}`];
+    parts.push(`*Category: ${noteCat} • Date: ${formatNoteDate(note.createdAt)}*`);
+
+    if (note.summary) {
+      parts.push(`## ✨ AI Summary & Key Takeaways\n\n${note.summary.trim()}`);
+    }
+
+    const mainBody = (content || note.content || '').trim();
+    if (mainBody) {
+      parts.push(`## 🎙️ Transcript / Content\n\n${mainBody}`);
+    }
+
+    return parts.join('\n\n');
+  }
+
+  async function handleCopyMarkdown() {
+    const md = getMarkdownContent();
+    await Clipboard.setStringAsync(md);
+    try {
+      await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+    } catch {}
+    setCopiedFormat('markdown');
+    setTimeout(() => setCopiedFormat(null), 2500);
+  }
+
+  async function handleCopyTranscript() {
+    const text = (content || note?.content || '').trim();
+    await Clipboard.setStringAsync(text);
+    try {
+      await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+    } catch {}
+    setCopiedFormat('transcript');
+    setTimeout(() => setCopiedFormat(null), 2500);
+  }
+
+  async function handleCopySummary() {
+    if (!note?.summary) return;
+    await Clipboard.setStringAsync(note.summary.trim());
+    try {
+      await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+    } catch {}
+    setCopiedFormat('summary');
+    setTimeout(() => setCopiedFormat(null), 2500);
+  }
+
+  async function handleShareNative() {
     if (!note) return;
     try {
       await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
     } catch {}
-
-    const textToShare =
-      activeTab === 'summary' && note.summary
-        ? `${note.title} (AI Summary)\n\n${note.summary}`
-        : `${note.title}\n\n${note.content}\n\nCategory: ${getNoteCategory(note)}`;
-
+    const textToShare = getMarkdownContent();
     await Share.share({
-      title: note.title,
+      title: title.trim() || note.title,
       message: textToShare,
     });
   }
@@ -429,13 +477,23 @@ export default function NoteDetailScreen() {
 
           {/* Actions */}
           <View style={styles.actionRow}>
-            <Pressable onPress={shareNote} style={styles.shareButton}>
-              <ThemedText style={styles.shareText}>↗ Share</ThemedText>
+            <Pressable
+              onPress={() => {
+                try { Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light); } catch {}
+                setIsExportOpen(true);
+              }}
+              style={styles.shareButton}
+              accessibilityRole="button"
+              accessibilityLabel="Export or share note"
+            >
+              <ThemedText style={styles.shareText}>↗ Export & Share</ThemedText>
             </Pressable>
             <Pressable
               onPress={saveChanges}
               disabled={isSaving}
               style={({ pressed }) => [styles.saveButton, pressed && styles.pressed]}
+              accessibilityRole="button"
+              accessibilityLabel="Save note changes"
             >
               <ThemedText style={styles.saveText}>
                 {isSaving ? 'Saving…' : '💾 Save changes'}
@@ -444,6 +502,117 @@ export default function NoteDetailScreen() {
           </View>
         </ScrollView>
       </SafeAreaView>
+
+      {/* Export / Share Modal */}
+      <Modal
+        visible={isExportOpen}
+        animationType="slide"
+        transparent
+        onRequestClose={() => setIsExportOpen(false)}
+      >
+        <Pressable
+          style={styles.exportModalBackdrop}
+          onPress={() => setIsExportOpen(false)}
+        >
+          <Pressable style={styles.exportSheet} onPress={(e) => e.stopPropagation()}>
+            <View style={styles.exportSheetHandle} />
+            <View style={styles.exportSheetHeader}>
+              <View>
+                <ThemedText style={styles.exportSheetTitle}>Export & Share</ThemedText>
+                <ThemedText style={styles.exportSheetSubtitle}>
+                  Save or send your note and AI summaries
+                </ThemedText>
+              </View>
+              <Pressable
+                onPress={() => setIsExportOpen(false)}
+                style={styles.exportCloseBtn}
+                accessibilityRole="button"
+                accessibilityLabel="Close export options"
+              >
+                <ThemedText style={styles.exportCloseText}>×</ThemedText>
+              </Pressable>
+            </View>
+
+            <View style={styles.exportList}>
+              {/* Option 1: Copy as Markdown */}
+              <Pressable
+                onPress={handleCopyMarkdown}
+                style={({ pressed }) => [styles.exportOption, pressed && styles.exportOptionPressed]}
+                accessibilityRole="button"
+              >
+                <View style={styles.exportIconBox}>
+                  <ThemedText style={styles.exportIcon}>📋</ThemedText>
+                </View>
+                <View style={styles.exportOptionInfo}>
+                  <ThemedText style={styles.exportOptionTitle}>
+                    {copiedFormat === 'markdown' ? '✓ Copied Markdown to Clipboard!' : 'Copy formatted Markdown'}
+                  </ThemedText>
+                  <ThemedText style={styles.exportOptionDesc}>
+                    Obsidian, Notion, Bear, GitHub & notes apps
+                  </ThemedText>
+                </View>
+              </Pressable>
+
+              {/* Option 2: Share via Apps */}
+              <Pressable
+                onPress={handleShareNative}
+                style={({ pressed }) => [styles.exportOption, pressed && styles.exportOptionPressed]}
+                accessibilityRole="button"
+              >
+                <View style={[styles.exportIconBox, { backgroundColor: DS.colors.accentLight }]}>
+                  <ThemedText style={styles.exportIcon}>↗</ThemedText>
+                </View>
+                <View style={styles.exportOptionInfo}>
+                  <ThemedText style={styles.exportOptionTitle}>Share via apps</ThemedText>
+                  <ThemedText style={styles.exportOptionDesc}>
+                    WhatsApp, Email, Messages, Slack, AirDrop
+                  </ThemedText>
+                </View>
+              </Pressable>
+
+              {/* Option 3: Plain text copy */}
+              <Pressable
+                onPress={handleCopyTranscript}
+                style={({ pressed }) => [styles.exportOption, pressed && styles.exportOptionPressed]}
+                accessibilityRole="button"
+              >
+                <View style={[styles.exportIconBox, { backgroundColor: '#F1F5F9' }]}>
+                  <ThemedText style={styles.exportIcon}>📝</ThemedText>
+                </View>
+                <View style={styles.exportOptionInfo}>
+                  <ThemedText style={styles.exportOptionTitle}>
+                    {copiedFormat === 'transcript' ? '✓ Copied Plain Text!' : 'Copy plain transcript'}
+                  </ThemedText>
+                  <ThemedText style={styles.exportOptionDesc}>
+                    Raw text without markdown headings
+                  </ThemedText>
+                </View>
+              </Pressable>
+
+              {/* Option 4: Summary copy (if summary exists) */}
+              {Boolean(note?.summary) && (
+                <Pressable
+                  onPress={handleCopySummary}
+                  style={({ pressed }) => [styles.exportOption, pressed && styles.exportOptionPressed]}
+                  accessibilityRole="button"
+                >
+                  <View style={[styles.exportIconBox, { backgroundColor: DS.colors.primaryLight }]}>
+                    <ThemedText style={styles.exportIcon}>✨</ThemedText>
+                  </View>
+                  <View style={styles.exportOptionInfo}>
+                    <ThemedText style={styles.exportOptionTitle}>
+                      {copiedFormat === 'summary' ? '✓ Copied AI Summary!' : 'Copy AI summary only'}
+                    </ThemedText>
+                    <ThemedText style={styles.exportOptionDesc}>
+                      Executive summary, key points & action items
+                    </ThemedText>
+                  </View>
+                </Pressable>
+              )}
+            </View>
+          </Pressable>
+        </Pressable>
+      </Modal>
     </ThemedView>
   );
 }
@@ -659,4 +828,95 @@ const styles = StyleSheet.create({
   },
   saveText: { color: '#FFFFFF', fontSize: DS.font.bodyMd, fontWeight: '800' },
   pressed: { opacity: 0.84, transform: [{ scale: 0.99 }] },
+  exportModalBackdrop: {
+    flex: 1,
+    justifyContent: 'flex-end',
+    backgroundColor: 'rgba(24, 34, 53, 0.45)',
+  },
+  exportSheet: {
+    backgroundColor: DS.colors.surface,
+    borderTopLeftRadius: DS.radius.xl,
+    borderTopRightRadius: DS.radius.xl,
+    padding: 24,
+    paddingBottom: 40,
+    ...DS.shadow.floating,
+  },
+  exportSheetHandle: {
+    width: 44,
+    height: 5,
+    borderRadius: 3,
+    backgroundColor: DS.colors.borderStrong,
+    alignSelf: 'center',
+    marginBottom: 16,
+  },
+  exportSheetHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 20,
+  },
+  exportSheetTitle: {
+    color: DS.colors.ink,
+    fontSize: DS.font.h2,
+    fontWeight: '800',
+  },
+  exportSheetSubtitle: {
+    color: DS.colors.muted,
+    fontSize: DS.font.sm,
+    marginTop: 3,
+  },
+  exportCloseBtn: {
+    width: 36,
+    height: 36,
+    borderRadius: DS.radius.full,
+    backgroundColor: DS.colors.surfaceDim,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  exportCloseText: {
+    color: DS.colors.muted,
+    fontSize: 22,
+    lineHeight: 24,
+  },
+  exportList: {
+    gap: 10,
+  },
+  exportOption: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    padding: 14,
+    borderRadius: DS.radius.md,
+    backgroundColor: DS.colors.surfaceDim,
+    borderWidth: 1,
+    borderColor: DS.colors.border,
+  },
+  exportOptionPressed: {
+    backgroundColor: DS.colors.primaryLight,
+    borderColor: DS.colors.primary,
+  },
+  exportIconBox: {
+    width: 44,
+    height: 44,
+    borderRadius: DS.radius.sm,
+    backgroundColor: DS.colors.primaryLight,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginRight: 14,
+  },
+  exportIcon: {
+    fontSize: 20,
+  },
+  exportOptionInfo: {
+    flex: 1,
+  },
+  exportOptionTitle: {
+    color: DS.colors.ink,
+    fontSize: DS.font.bodyMd,
+    fontWeight: '700',
+  },
+  exportOptionDesc: {
+    color: DS.colors.muted,
+    fontSize: DS.font.xs,
+    marginTop: 2,
+  },
 });
