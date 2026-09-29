@@ -256,8 +256,8 @@ export async function transcribeAudio(
       rawMsg.includes('503');
 
     if (isRetryable) {
-      console.log('Transcription initial attempt encountered transient error; retrying in 2s…');
-      await new Promise((resolve) => setTimeout(resolve, 2000));
+      console.log('Transcription initial attempt encountered transient error; retrying in 5s…');
+      await new Promise((resolve) => setTimeout(resolve, 5000));
       try {
         return await performTranscriptionAttempt(audioUri, options);
       } catch (secondError) {

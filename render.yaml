@@ -11,8 +11,6 @@ services:
         sync: false
       - key: GROQ_TRANSLATION_MODEL
         value: whisper-large-v3
-      - key: GROQ_TRANSCRIPTION_MODEL
-        value: whisper-large-v3-turbo
       - key: MAX_REQUESTS_PER_MINUTE
         value: "10"
       - key: MAX_REQUESTS_PER_USER_PER_MINUTE

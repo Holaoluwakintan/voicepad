@@ -1,6 +1,7 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Platform, Pressable, StyleSheet, Text, View } from 'react-native';
 import { useEffect, useState } from 'react';
+import { useRouter } from 'expo-router';
 import { useAuth } from '@/lib/auth';
 
 const TERMS_KEY = '@voicepad/terms_accepted_v1';
@@ -15,6 +16,7 @@ const TERMS_KEY = '@voicepad/terms_accepted_v1';
 export function AdMobBanner() {
   const [consented, setConsented] = useState(false);
   const { user } = useAuth();
+  const router = useRouter();
 
   useEffect(() => {
     AsyncStorage.getItem(TERMS_KEY).then((value) => setConsented(value === 'true'));
@@ -48,10 +50,7 @@ export function AdMobBanner() {
       <BannerAd unitId={unitId} size={bannerSize} />
       <Pressable
         style={styles.removeAdsBtn}
-        onPress={() => {
-          // TODO: navigate to Pro upgrade screen or show subscription modal
-          // router.push('/upgrade')
-        }}
+        onPress={() => router.push('/(tabs)/profile')}
         accessibilityLabel="Remove ads by going Pro"
         accessibilityRole="button"
       >

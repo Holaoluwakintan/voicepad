@@ -371,7 +371,7 @@ async function callDeepgramTranscription(audioBuffer, mimeType) {
 
 async function callGeminiTranscription(audioBuffer, mimeType) {
   if (geminiKeys.length === 0 || !audioBuffer || audioBuffer.length === 0) return null;
-  const geminiModels = ['gemini-flash-lite-latest', 'gemini-3-flash-preview', 'gemini-flash-latest'];
+  const geminiModels = ['gemini-2.0-flash-lite', 'gemini-2.5-flash', 'gemini-2.0-flash'];
   const base64Data = audioBuffer.toString('base64');
   for (const apiKey of geminiKeys) {
     for (const model of geminiModels) {
@@ -429,7 +429,7 @@ async function callGeminiTranscription(audioBuffer, mimeType) {
 
 async function callGeminiSummary(text) {
   if (geminiKeys.length === 0) return null;
-  const geminiModels = ['gemini-flash-lite-latest', 'gemini-3-flash-preview', 'gemini-flash-latest'];
+  const geminiModels = ['gemini-2.0-flash-lite', 'gemini-2.5-flash', 'gemini-2.0-flash'];
   for (const apiKey of geminiKeys) {
     for (const model of geminiModels) {
       try {
@@ -473,7 +473,7 @@ async function callGeminiSummary(text) {
 
 async function callGeminiVision(base64Data, mimeType) {
   if (geminiKeys.length === 0) return null;
-  const geminiVisionModels = ['gemini-flash-lite-latest', 'gemini-3-flash-preview', 'gemini-flash-latest'];
+  const geminiVisionModels = ['gemini-2.0-flash-lite', 'gemini-2.5-flash', 'gemini-2.0-flash'];
   for (const apiKey of geminiKeys) {
     for (const model of geminiVisionModels) {
       try {
@@ -655,8 +655,6 @@ app.post('/summarize', authMiddleware, rateLimitMiddleware, idempotencyMiddlewar
     'openai/gpt-oss-20b',
     'qwen/qwen3.8-27b',
     'openai/gpt-oss-120b',
-    'llama-3.3-70b-versatile',
-    'llama-3.1-8b-instant',
   ].filter(Boolean);
 
   for (const apiKey of groqKeys) {
