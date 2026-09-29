@@ -113,7 +113,9 @@ app.use((req, res, next) => {
 app.all(['/health', '/ping'], (_req, res) => res.json({ ok: true, service: 'voicepad-transcription', timestamp: Date.now() }));
 
 // Render Free Tier keep-alive: ping self every 13 minutes if deployed on Render
-const renderExternalUrl = process.env.RENDER_EXTERNAL_URL || (process.env.NODE_ENV === 'production' ? 'https://voicepad-transcription.onrender.com' : null);
+// Use RENDER_EXTERNAL_URL env var (set in Render dashboard) for the keep-alive ping.
+// We do NOT fall back to a hardcoded URL because the service name could change.
+const renderExternalUrl = process.env.RENDER_EXTERNAL_URL || null;
 if (renderExternalUrl) {
   setInterval(async () => {
     try {
@@ -331,15 +333,18 @@ const deepgramKeys = getApiKeyList(
   process.env.DEEPGRAM_API_KEYS
 );
 
-async function callDeepgramTranscription(audioBuffer, mimeType) {
+async function callDeepgramTranscription(audioBuffer, mimeType, language) {
   if (deepgramKeys.length === 0 || !audioBuffer || audioBuffer.length === 0) return null;
+  const langParam = language && language !== 'auto'
+    ? `&language=${encodeURIComponent(language)}`
+    : '&detect_language=true';
   for (const apiKey of deepgramKeys) {
     try {
       const controller = new AbortController();
       const timeout = setTimeout(() => controller.abort(), 60_000);
       let response;
       try {
-        response = await fetch('https://api.deepgram.com/v1/listen?model=nova-2&smart_format=true&punctuate=true', {
+        response = await fetch(`https://api.deepgram.com/v1/listen?model=nova-2&smart_format=true&punctuate=true${langParam}`, {
           method: 'POST',
           headers: {
             Authorization: `Token ${apiKey}`,
@@ -358,7 +363,7 @@ async function callDeepgramTranscription(audioBuffer, mimeType) {
       }
       const data = await response.json().catch(() => null);
       const transcript = data?.results?.channels?.[0]?.alternatives?.[0]?.transcript;
-      if (transcript && typeof transcript === 'string' && transcript.trim()) {
+      if (transcript !== undefined && typeof transcript === 'string' && transcript.trim()) {
         console.log('deepgram_transcription_succeeded');
         return { text: transcript.trim(), model: 'deepgram/nova-2' };
       }
@@ -369,10 +374,15 @@ async function callDeepgramTranscription(audioBuffer, mimeType) {
   return null;
 }
 
-async function callGeminiTranscription(audioBuffer, mimeType) {
+async function callGeminiTranscription(audioBuffer, mimeType, language) {
   if (geminiKeys.length === 0 || !audioBuffer || audioBuffer.length === 0) return null;
   const geminiModels = ['gemini-2.0-flash-lite', 'gemini-2.5-flash', 'gemini-2.0-flash'];
   const base64Data = audioBuffer.toString('base64');
+  const langInstruction = language && language !== 'auto'
+    ? ` The spoken language is ${language}.`
+    : '';
+  const promptText = `Transcribe this audio recording verbatim.${langInstruction} Output ONLY the transcribed words and punctuation. Do NOT add preamble, markdown code blocks, or commentary. If the recording is completely silent or only contains static noise, reply with nothing.`;
+
   for (const apiKey of geminiKeys) {
     for (const model of geminiModels) {
       try {
@@ -390,7 +400,7 @@ async function callGeminiTranscription(audioBuffer, mimeType) {
               contents: [{
                 parts: [
                   {
-                    text: 'Transcribe this audio recording verbatim. Output ONLY the transcribed words and punctuation. Do NOT add preamble, markdown code blocks, or commentary. If the recording is completely silent or only contains static noise, reply with nothing.',
+                    text: promptText,
                   },
                   {
                     inlineData: {
@@ -586,6 +596,8 @@ app.post('/transcribe', authMiddleware, rateLimitMiddleware, idempotencyMiddlewa
     console.log(`transcription_skip_groq reason=file_too_large bytes=${audioBuffer.length} limit=${groqMaxFileSize}`);
   }
 
+  const requestedLanguage = req.body?.language || req.query?.language;
+
   for (const apiKey of exceedsGroqLimit ? [] : groqKeys) {
     for (const model of models) {
       try {
@@ -594,6 +606,9 @@ app.post('/transcribe', authMiddleware, rateLimitMiddleware, idempotencyMiddlewa
         form.append('model', model);
         form.append('response_format', 'json');
         form.append('temperature', '0');
+        if (requestedLanguage && requestedLanguage !== 'auto') {
+          form.append('language', requestedLanguage);
+        }
 
         const controller = new AbortController();
         const timeout = setTimeout(() => controller.abort(), 60_000);
@@ -614,7 +629,7 @@ app.post('/transcribe', authMiddleware, rateLimitMiddleware, idempotencyMiddlewa
           console.warn(`transcription_model_failed model=${model} status=${response.status}`, payload?.error?.message);
           continue; // Try next model candidate
         }
-        if (payload?.text && typeof payload.text === 'string') {
+        if (payload?.text !== undefined && typeof payload.text === 'string') {
           console.log(`groq_transcription_succeeded model=${model}`);
           return res.json({ text: payload.text.trim(), model });
         }
@@ -626,14 +641,14 @@ app.post('/transcribe', authMiddleware, rateLimitMiddleware, idempotencyMiddlewa
 
   // 2. Cascading Fallback: Deepgram Nova-2 speech-to-text
   console.log('transcribe: Groq keys exhausted or failed, attempting Deepgram fallback');
-  const deepgramResult = await callDeepgramTranscription(audioBuffer, audioMimeType);
+  const deepgramResult = await callDeepgramTranscription(audioBuffer, audioMimeType, requestedLanguage);
   if (deepgramResult) {
     return res.json(deepgramResult);
   }
 
   // 3. Cascading Fallback: Google Gemini Multimodal STT
   console.log('transcribe: Deepgram exhausted or failed, attempting Google Gemini STT fallback');
-  const geminiResult = await callGeminiTranscription(audioBuffer, audioMimeType);
+  const geminiResult = await callGeminiTranscription(audioBuffer, audioMimeType, requestedLanguage);
   if (geminiResult) {
     return res.json(geminiResult);
   }

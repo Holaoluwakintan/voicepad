@@ -4,7 +4,7 @@
  * Premium: glass-effect stat cards, gradient avatar ring, polished auth card.
  */
 import { useFocusEffect } from 'expo-router';
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
@@ -28,6 +28,7 @@ import { useAuth } from '@/lib/auth';
 import { loadNotes, Note } from '@/lib/notes';
 import { syncNotes } from '@/lib/sync';
 import { DS } from '@/constants/design';
+import Constants from 'expo-constants';
 
 export default function ProfileScreen() {
   const {
@@ -61,6 +62,7 @@ export default function ProfileScreen() {
   const [fullName, setFullName] = useState('');
   const [isUpdatingProfile, setIsUpdatingProfile] = useState(false);
   const [legalModalDoc, setLegalModalDoc] = useState<'terms' | 'privacy' | null>(null);
+  const lastSyncRef = useRef(0);
 
   useFocusEffect(
     useCallback(() => {
@@ -73,6 +75,10 @@ export default function ProfileScreen() {
 
   useEffect(() => {
     if (!user) return;
+    // Debounce: don't re-sync if we synced within the last 60 seconds
+    // (prevents hammering Supabase on token refresh causing user reference change)
+    if (Date.now() - lastSyncRef.current < 60_000) return;
+    lastSyncRef.current = Date.now();
     syncNotes(user.id).then(async (result) => {
       setSyncMessage(result.ok ? (result.message || 'Synced just now.') : result.message ?? 'Sync unavailable.');
       if (result.ok) setNotes(await loadNotes());
@@ -439,7 +445,7 @@ export default function ProfileScreen() {
             },
             {
               title: 'About VoicePad',
-              action: 'v1.0.0',
+              action: `v${Constants.expoConfig?.version ?? '1.0.0'}`,
               onPress: () => Alert.alert('VoicePad v1.0', 'Capture lectures, sermons, meetings, and ideas in high fidelity.'),
             },
           ].map((row) => (

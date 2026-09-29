@@ -25,7 +25,7 @@ const REQUEST_TIMEOUT_MS = 120_000; // 2 minutes to comfortably absorb Render co
 
 async function performTranscriptionAttempt(
   audioUri: string,
-  options: { noteId: string; filename?: string }
+  options: { noteId: string; filename?: string; language?: string }
 ): Promise<TranscriptionResult> {
   const nativeFilename = options.filename ?? `voicepad-${options.noteId}.m4a`;
   const authHeaders = await getAuthHeaders();
@@ -45,6 +45,7 @@ async function performTranscriptionAttempt(
           parameters: {
             noteId: options.noteId,
             mode: 'english',
+            ...(options.language ? { language: options.language } : {}),
           },
           headers: {
             Accept: 'application/json',
@@ -62,6 +63,9 @@ async function performTranscriptionAttempt(
         payload = JSON.parse(uploadResult.body);
       } catch {}
 
+      if (status === 401) {
+        throw new Error('AUTH_REQUIRED');
+      }
       if (status >= 200 && status < 300 && payload?.text && typeof payload.text === 'string') {
         return { text: payload.text.trim() };
       }
@@ -100,11 +104,15 @@ async function performTranscriptionAttempt(
             filename: nativeFilename,
             mimeType: 'audio/m4a',
             noteId: options.noteId,
+            ...(options.language ? { language: options.language } : {}),
           }),
           signal: controller.signal,
         });
 
         const jsonPayload = await jsonResponse.json().catch(() => null);
+        if (jsonResponse.status === 401) {
+          throw new Error('AUTH_REQUIRED');
+        }
         if (jsonResponse.ok && jsonPayload?.text && typeof jsonPayload.text === 'string') {
           return { text: jsonPayload.text.trim() };
         }
@@ -151,6 +159,9 @@ async function performTranscriptionAttempt(
     const form = new FormData();
     form.append('noteId', options.noteId);
     form.append('mode', 'english');
+    if (options.language) {
+      form.append('language', options.language);
+    }
     form.append('file', audioBlob, webFilename);
 
     const controller = new AbortController();
@@ -168,6 +179,9 @@ async function performTranscriptionAttempt(
       });
 
       const payload = await response.json().catch(() => null);
+      if (response.status === 401) {
+        throw new Error('AUTH_REQUIRED');
+      }
       if (response.ok && payload?.text && typeof payload.text === 'string') {
         return { text: payload.text.trim() };
       }
@@ -215,11 +229,15 @@ async function performTranscriptionAttempt(
           filename: webFilename,
           mimeType,
           noteId: options.noteId,
+          ...(options.language ? { language: options.language } : {}),
         }),
         signal: controller.signal,
       });
 
       const payload = await response.json().catch(() => null);
+      if (response.status === 401) {
+        throw new Error('AUTH_REQUIRED');
+      }
       if (response.ok && payload?.text && typeof payload.text === 'string') {
         return { text: payload.text.trim() };
       }
@@ -241,13 +259,16 @@ async function performTranscriptionAttempt(
 
 export async function transcribeAudio(
   audioUri: string,
-  options: { noteId: string; filename?: string }
+  options: { noteId: string; filename?: string; language?: string }
 ): Promise<TranscriptionResult> {
   try {
     return await performTranscriptionAttempt(audioUri, options);
   } catch (firstError) {
-    // Automatic 1x retry on cold-start timeouts or network drops
     const rawMsg = String(firstError);
+    if (rawMsg.includes('AUTH_REQUIRED')) {
+      throw new Error('AUTH_REQUIRED');
+    }
+    // Automatic 1x retry on cold-start timeouts or network drops
     const isRetryable =
       rawMsg.includes('timed out') ||
       rawMsg.includes('AbortError') ||
@@ -261,6 +282,9 @@ export async function transcribeAudio(
       try {
         return await performTranscriptionAttempt(audioUri, options);
       } catch (secondError) {
+        if (String(secondError).includes('AUTH_REQUIRED')) {
+          throw new Error('AUTH_REQUIRED');
+        }
         throw new Error(toFriendlyErrorMessage(secondError, 'Transcription service is currently unavailable. Please retry shortly.'));
       }
     }

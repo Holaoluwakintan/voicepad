@@ -38,11 +38,13 @@ function NoteCard({
   index,
   onPress,
   onLongPress,
+  onRetry,
 }: {
   item: Note;
   index: number;
   onPress: () => void;
   onLongPress: () => void;
+  onRetry: () => void;
 }) {
   const catData = DS.category[item.category ?? 'Personal'] ?? DS.category.Personal;
   const isPending = item.transcriptionStatus === 'pending';
@@ -106,6 +108,17 @@ function NoteCard({
           >
             {preview}
           </ThemedText>
+
+          {/* Inline retry chip for failed transcriptions */}
+          {isFailed && (
+            <Pressable
+              onPress={(e) => { e.stopPropagation?.(); onRetry(); }}
+              style={styles.retryChip}
+              accessibilityLabel="Retry transcription"
+            >
+              <ThemedText style={styles.retryChipText}>↻ Retry</ThemedText>
+            </Pressable>
+          )}
 
           {/* Bottom row */}
           <View style={styles.cardBottomRow}>
@@ -233,6 +246,11 @@ export default function HomeScreen() {
     ]);
   }
 
+  async function retryNote(note: Note) {
+    try { await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium); } catch {}
+    router.push(`/note/${note.id}`);
+  }
+
   function SectionHeader({ label, count }: { label: string; count: number }) {
     return (
       <View style={styles.sectionHeader}>
@@ -266,6 +284,7 @@ export default function HomeScreen() {
                 index={index}
                 onPress={() => router.push(`/note/${item.id}`)}
                 onLongPress={() => selectNote(item)}
+                onRetry={() => retryNote(item)}
               />
             </>
           )}
@@ -776,4 +795,19 @@ const styles = StyleSheet.create({
     ...DS.shadow.primary,
   },
   composerSaveBtnText: { color: '#FFFFFF', fontSize: DS.font.bodyMd, fontWeight: '800' },
+  retryChip: {
+    alignSelf: 'flex-start',
+    marginTop: 8,
+    backgroundColor: DS.colors.dangerLight,
+    borderWidth: 1,
+    borderColor: '#FCA5A5',
+    borderRadius: DS.radius.full,
+    paddingHorizontal: 12,
+    paddingVertical: 5,
+  },
+  retryChipText: {
+    color: DS.colors.danger,
+    fontSize: DS.font.caption,
+    fontWeight: '800',
+  },
 });

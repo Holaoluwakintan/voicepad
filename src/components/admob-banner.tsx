@@ -12,6 +12,7 @@ const TERMS_KEY = '@voicepad/terms_accepted_v1';
  * - Shows a native AdMob banner for free (consented) users on native builds.
  * - Shows a small "Remove ads" nudge below the banner so users know how to upgrade.
  * - Does nothing on web (AdSense is handled separately in the web build).
+ * - AdMob is initialised once at app startup in _layout.tsx, not here.
  */
 export function AdMobBanner() {
   const [consented, setConsented] = useState(false);
@@ -27,7 +28,6 @@ export function AdMobBanner() {
   if (isPro || Platform.OS === 'web' || !consented) return null;
 
   // Keep Expo Go and web builds safe: the native module is only required on a native build.
-  // Production builds must provide EXPO_PUBLIC_ADMOB_BANNER_ID; development uses Google's test ID.
   let ads: any;
   try {
     // eslint-disable-next-line @typescript-eslint/no-require-imports
@@ -40,10 +40,6 @@ export function AdMobBanner() {
   const unitId = Platform.OS === 'ios'
     ? process.env.EXPO_PUBLIC_ADMOB_IOS_BANNER_ID || ads.TestIds.BANNER
     : process.env.EXPO_PUBLIC_ADMOB_BANNER_ID || ads.TestIds.BANNER;
-  if (!ads.__voicepadInitialized) {
-    ads.__voicepadInitialized = true;
-    void ads.default().initialize();
-  }
 
   return (
     <View style={styles.container} accessibilityLabel="Advertisement">
@@ -77,4 +73,3 @@ const styles = StyleSheet.create({
     textDecorationLine: 'underline',
   },
 });
-

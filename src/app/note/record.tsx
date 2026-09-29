@@ -42,7 +42,23 @@ import { useAuth } from '@/lib/auth';
 import { DS } from '@/constants/design';
 import { generateNoteId, isSupportedAudio, SUPPORTED_AUDIO_EXTENSIONS, toFriendlyErrorMessage } from '@/lib/utils';
 
-type TranscriptState = 'idle' | 'saving' | 'transcribing' | 'ready' | 'failed';
+type TranscriptState = 'idle' | 'saving' | 'transcribing' | 'uploading' | 'ready' | 'failed';
+
+const LANGUAGES = [
+  { code: 'auto', label: '🌐 Auto-detect' },
+  { code: 'en', label: '🇬🇧 English' },
+  { code: 'fr', label: '🇫🇷 French' },
+  { code: 'es', label: '🇪🇸 Spanish' },
+  { code: 'de', label: '🇩🇪 German' },
+  { code: 'ar', label: '🇸🇦 Arabic' },
+  { code: 'zh', label: '🇨🇳 Chinese' },
+  { code: 'pt', label: '🇧🇷 Portuguese' },
+  { code: 'hi', label: '🇮🇳 Hindi' },
+  { code: 'yo', label: '🇳🇬 Yoruba' },
+  { code: 'ha', label: '🇳🇬 Hausa' },
+  { code: 'ig', label: '🇳🇬 Igbo' },
+] as const;
+type LangCode = typeof LANGUAGES[number]['code'];
 
 export default function RecordScreen() {
   const router = useRouter();
@@ -72,6 +88,9 @@ export default function RecordScreen() {
   const [transcriptText, setTranscriptText] = useState('');
   const [transcriptError, setTranscriptError] = useState('');
   const [copied, setCopied] = useState(false);
+  const [selectedLanguage, setSelectedLanguage] = useState<LangCode>('auto');
+  const [transcribingMsg, setTranscribingMsg] = useState('Sending to AI…');
+  const [showLangPicker, setShowLangPicker] = useState(false);
 
   // Pulse animation
   const pulseScale = useSharedValue(1);
@@ -246,8 +265,18 @@ export default function RecordScreen() {
   // ─── Shared transcription ─────────────────────────────────────────────────
 
   async function transcribeSavedNote(uri: string, noteId: string, filename?: string) {
+    // Cycle through reassuring progress messages so users don't think it's frozen
+    setTranscribingMsg('Sending to AI…');
+    const msgTimer = setInterval(() => {
+      setTranscribingMsg((prev) =>
+        prev === 'Sending to AI…' ? 'Processing audio…' :
+        prev === 'Processing audio…' ? 'Almost ready…' :
+        'Still working…'
+      );
+    }, 8000);
     try {
-      const result = await transcribeAudio(uri, { noteId, filename });
+      const result = await transcribeAudio(uri, { noteId, filename, language: selectedLanguage === 'auto' ? undefined : selectedLanguage });
+      clearInterval(msgTimer);
       const notes = await loadNotes();
       const current = notes.find((n) => n.id === noteId);
       const title =
@@ -267,7 +296,11 @@ export default function RecordScreen() {
       setTranscriptState('ready');
       try { Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success); } catch {}
     } catch (error) {
-      const message = toFriendlyErrorMessage(error, 'Transcription could not be completed. Please try again.');
+      clearInterval(msgTimer);
+      const isAuthError = error instanceof Error && error.message === 'AUTH_REQUIRED';
+      const message = isAuthError
+        ? 'Sign in required. Go to Profile → Sign In to use AI transcription.'
+        : toFriendlyErrorMessage(error, 'Transcription could not be completed. Please try again.');
       await updateNote(noteId, { transcriptionStatus: 'failed', transcriptionError: message });
       setTranscriptError(message);
       setTranscriptState('failed');
@@ -300,7 +333,7 @@ export default function RecordScreen() {
   const statusLabel =
     isRecording ? 'Recording in progress…'
     : transcriptState === 'saving' ? 'Saving audio…'
-    : transcriptState === 'transcribing' ? 'Transcribing… please wait'
+    : transcriptState === 'transcribing' ? transcribingMsg
     : transcriptState === 'ready' ? 'Transcription complete ✓'
     : transcriptState === 'failed' ? 'Transcription failed'
     : permission === 'denied' ? 'Microphone unavailable'
@@ -370,7 +403,7 @@ export default function RecordScreen() {
           ) : transcriptState === 'transcribing' ? (
             <View style={styles.transcribingBox}>
               <ThemedText style={styles.transcribingText}>
-                ⏳  Transcribing your audio…{'\n'}
+                ⏳  {transcribingMsg}{'\n'}
                 <ThemedText style={styles.transcribingNote}>
                   Connecting to AI service. (If the server is waking up, this may take ~30s).
                 </ThemedText>
@@ -387,6 +420,31 @@ export default function RecordScreen() {
             {/* Idle: Record button + Upload button */}
             {isIdle && (
               <View style={styles.idleControls}>
+                {/* Language selection pills */}
+                <View style={styles.langSelectorWrapper}>
+                  <ThemedText style={styles.langSelectorLabel}>Spoken Language</ThemedText>
+                  <ScrollView
+                    horizontal
+                    showsHorizontalScrollIndicator={false}
+                    contentContainerStyle={styles.langScrollContainer}
+                  >
+                    {LANGUAGES.map((lang) => {
+                      const isSelected = selectedLanguage === lang.code;
+                      return (
+                        <Pressable
+                          key={lang.code}
+                          onPress={() => setSelectedLanguage(lang.code)}
+                          style={[styles.langChip, isSelected && styles.langChipActive]}
+                        >
+                          <ThemedText style={[styles.langChipText, isSelected && styles.langChipTextActive]}>
+                            {lang.label}
+                          </ThemedText>
+                        </Pressable>
+                      );
+                    })}
+                  </ScrollView>
+                </View>
+
                 {/* Big record button */}
                 <View style={styles.recordButtonWrapper}>
                   <Animated.View style={[styles.pulseRing, pulseStyle]} pointerEvents="none" />
@@ -580,6 +638,44 @@ const styles = StyleSheet.create({
     width: 140,
     height: 140,
     marginBottom: 10,
+  },
+  langSelectorWrapper: {
+    width: '100%',
+    marginBottom: 24,
+  },
+  langSelectorLabel: {
+    color: MUTED_TEXT,
+    fontSize: DS.font.xxs,
+    fontWeight: '700',
+    textTransform: 'uppercase',
+    letterSpacing: 1,
+    marginBottom: 10,
+    textAlign: 'center',
+  },
+  langScrollContainer: {
+    gap: 8,
+    paddingHorizontal: 4,
+  },
+  langChip: {
+    backgroundColor: 'rgba(255,255,255,0.08)',
+    borderRadius: DS.radius.full,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.15)',
+    paddingHorizontal: 12,
+    paddingVertical: 7,
+  },
+  langChipActive: {
+    backgroundColor: ACCENT,
+    borderColor: ACCENT,
+  },
+  langChipText: {
+    color: MUTED_TEXT,
+    fontSize: DS.font.xs,
+    fontWeight: '600',
+  },
+  langChipTextActive: {
+    color: '#FFFFFF',
+    fontWeight: '800',
   },
   pulseRing: {
     position: 'absolute',

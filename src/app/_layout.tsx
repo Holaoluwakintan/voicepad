@@ -1,6 +1,6 @@
 import { DarkTheme, DefaultTheme, Stack, ThemeProvider } from 'expo-router';
 import * as SplashScreen from 'expo-splash-screen';
-import { Alert, useColorScheme } from 'react-native';
+import { Alert, Platform, useColorScheme } from 'react-native';
 
 import { useEffect } from 'react';
 import { AnimatedSplashOverlay } from '@/components/animated-icon';
@@ -11,12 +11,26 @@ import { hasStorageRecovery, restoreNotesFromBackup } from '@/lib/notes';
 
 SplashScreen.preventAutoHideAsync();
 
+/** Initialise AdMob once at startup on native builds, safely. */
+function initAdMob() {
+  if (Platform.OS === 'web') return;
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const ads = require('react-native-google-mobile-ads');
+    ads.default().initialize().catch(() => {});
+  } catch {
+    // react-native-google-mobile-ads not linked (Expo Go / web) — ignore
+  }
+}
+
 export default function RootLayout() {
   const colorScheme = useColorScheme();
 
   useEffect(() => {
     // Pre-warm the cloud transcription server immediately on app launch
     wakeUpTranscriptionServer();
+    // Initialise AdMob once (moved out of render path for correct lifecycle)
+    initAdMob();
     hasStorageRecovery().then((needsRecovery) => {
       if (!needsRecovery) return;
       Alert.alert(
