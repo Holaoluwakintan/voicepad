@@ -189,12 +189,12 @@ function renderLegalHtml(title, sections) {
 app.get('/privacy', (_req, res) => res.type('html').send(renderLegalHtml('Privacy Policy', privacySections)));
 app.get('/terms', (_req, res) => res.type('html').send(renderLegalHtml('Terms of Service', termsSections)));
 
-const supabaseUrl = (process.env.SUPABASE_URL ?? process.env.EXPO_PUBLIC_SUPABASE_URL ?? '').trim();
-const supabaseAnonKey = (process.env.SUPABASE_ANON_KEY ?? process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY ?? '').trim();
-// Mobile app always sets X-Client-Type: mobile.
-// Web demo guests do NOT send this header → they get the guest daily limit instead.
-// requireAuth only blocks the mobile path when set to true.
-const requireAuth = process.env.REQUIRE_AUTH === 'true' || (isProduction && process.env.REQUIRE_AUTH !== 'false');
+const supabaseUrl = (process.env.SUPABASE_URL ?? process.env.EXPO_PUBLIC_SUPABASE_URL ?? 'https://vfwdrpvfcvwsrhxuabak.supabase.co').trim();
+const supabaseAnonKey = (process.env.SUPABASE_ANON_KEY ?? process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY ?? 'sb_publishable_c7Dqa3N6mHOmrN64oPDkHw_saVtTEFK').trim();
+// Only enforce strict authentication gate when explicitly configured (e.g. In test suites).
+// For the APK, users can transcribe immediately out of the box, and signed-in users still get verified.
+const requireAuth = process.env.REQUIRE_AUTH === 'true';
+
 
 async function authMiddleware(req, res, next) {
   // Try to verify the Bearer token if present (applies to both web signed-in and mobile)
