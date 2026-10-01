@@ -38,8 +38,8 @@ export function AdMobBanner() {
   const BannerAd = ads.BannerAd;
   const bannerSize = ads.BannerAdSize.ANCHORED_ADAPTIVE_BANNER;
   const unitId = Platform.OS === 'ios'
-    ? process.env.EXPO_PUBLIC_ADMOB_IOS_BANNER_ID || ads.TestIds.BANNER
-    : process.env.EXPO_PUBLIC_ADMOB_BANNER_ID || ads.TestIds.BANNER;
+    ? process.env.EXPO_PUBLIC_ADMOB_IOS_BANNER_ID || 'ca-app-pub-1282831461622449/4405209438'
+    : process.env.EXPO_PUBLIC_ADMOB_BANNER_ID || 'ca-app-pub-1282831461622449/3953869013';
 
   return (
     <View style={styles.container} accessibilityLabel="Advertisement">

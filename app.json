@@ -3,12 +3,12 @@
     "name": "voicepad",
     "slug": "voicepad",
     "version": "1.0.0",
-    "newArchEnabled": true,
     "description": "Private AI voice notes, transcription, summaries, and photo-to-text capture for ideas that should not get lost.",
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
     "scheme": "voicepad",
     "userInterfaceStyle": "automatic",
+    "newArchEnabled": true,
     "ios": {
       "bundleIdentifier": "com.holaoluwakintan.voicepad",
       "buildNumber": "1",
@@ -40,11 +40,9 @@
         "android.permission.FOREGROUND_SERVICE",
         "android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK"
       ],
-      "usesCleartextTraffic": true,
       "predictiveBackGestureEnabled": false
     },
     "plugins": [
-
       "expo-router",
       [
         "expo-splash-screen",
@@ -64,7 +62,15 @@
           "cameraPermission": "VoicePad needs camera access to scan notes and whiteboards."
         }
       ],
-      "expo-document-picker"
+      "expo-document-picker",
+      [
+        "react-native-google-mobile-ads",
+        {
+          "androidAppId": "ca-app-pub-1282831461622449~7508252014",
+          "iosAppId": "ca-app-pub-1282831461622449~8306153355",
+          "userTrackingUsageDescription": "This identifier helps deliver relevant ads. You can decline tracking in iOS settings."
+        }
+      ]
     ],
     "experiments": {
       "typedRoutes": true,
@@ -76,5 +82,9 @@
         "projectId": "25b69525-7e3f-48fd-b2ce-9eb652b46237"
       }
     }
+  },
+  "react-native-google-mobile-ads": {
+    "android_app_id": "ca-app-pub-1282831461622449~7508252014",
+    "ios_app_id": "ca-app-pub-1282831461622449~8306153355"
   }
 }
