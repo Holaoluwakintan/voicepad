@@ -61,6 +61,8 @@ export default function RootLayout() {
           <Stack.Screen name="note/[id]" />
           <Stack.Screen name="privacy" />
           <Stack.Screen name="terms" />
+          <Stack.Screen name="auth/callback" />
+          <Stack.Screen name="auth/reset-password" />
           <Stack.Screen name="upgrade" options={{ presentation: 'modal' }} />
         </Stack>
       </ThemeProvider>
