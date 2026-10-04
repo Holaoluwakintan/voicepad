@@ -35,11 +35,13 @@ const isProduction = process.env.NODE_ENV === 'production';
 // -----------------------------------------------------------------------
 //  Web Preview Guest Limit
 //  The web site gets 10 free transcriptions per IP per day (rolling 24h).
-//  The mobile app always bypasses this when it sends X-Client-Type: mobile.
+//  Mobile guests get a small daily quota; authenticated users bypass this.
 //  Signed-in users bypass this entirely via authMiddleware.
 // -----------------------------------------------------------------------
 const WEB_GUEST_DAILY_LIMIT = Number(process.env.WEB_GUEST_DAILY_LIMIT ?? 10);
 const webGuestUsage = new Map(); // ip -> [timestamp, ...]
+const MOBILE_GUEST_DAILY_LIMIT = Number(process.env.MOBILE_GUEST_DAILY_LIMIT ?? 3);
+const mobileGuestUsage = new Map(); // ip -> { timestamps, requestKeys }
 // Clean stale entries once per hour
 setInterval(() => {
   const cutoff = Date.now() - 24 * 60 * 60_000;
@@ -49,6 +51,28 @@ setInterval(() => {
     else webGuestUsage.set(ip, fresh);
   }
 }, 60 * 60_000).unref?.();
+
+function isMobileGuestLimited(ip, requestKey) {
+  const cutoff = Date.now() - 24 * 60 * 60_000;
+  const current = mobileGuestUsage.get(ip) ?? { timestamps: [], requestKeys: new Map() };
+  current.timestamps = current.timestamps.filter((timestamp) => timestamp > cutoff);
+  for (const [key, timestamp] of current.requestKeys.entries()) {
+    if (timestamp <= cutoff) current.requestKeys.delete(key);
+  }
+  // Multipart fallback retries use the same idempotency key and count once.
+  if (requestKey && current.requestKeys.has(requestKey)) {
+    mobileGuestUsage.set(ip, current);
+    return false;
+  }
+  if (current.timestamps.length >= MOBILE_GUEST_DAILY_LIMIT) {
+    mobileGuestUsage.set(ip, current);
+    return true;
+  }
+  current.timestamps.push(Date.now());
+  if (requestKey) current.requestKeys.set(requestKey, Date.now());
+  mobileGuestUsage.set(ip, current);
+  return false;
+}
 
 function isWebGuestLimited(ip) {
   const cutoff = Date.now() - 24 * 60 * 60_000;
@@ -93,8 +117,10 @@ app.use(express.json({ limit: '60mb' }));
 app.use(express.urlencoded({ extended: true, limit: '60mb' }));
 app.use(cors({
   origin(origin, callback) {
-    // When ALLOWED_ORIGINS is not set, allow all origins (web demo mode).
-    // In production, set ALLOWED_ORIGINS on Render to restrict to your domains.
+    // Development/test may omit origins; production must be explicitly allowlisted.
+    if (isProduction && !allowedOrigins.length) {
+      return callback(new Error('ALLOWED_ORIGINS must be configured in production'));
+    }
     if (!allowedOrigins.length || !origin) return callback(null, true);
     if (allowedOrigins.includes('*') || allowedOrigins.includes(origin)) {
       return callback(null, true);
@@ -189,17 +215,16 @@ function renderLegalHtml(title, sections) {
 app.get('/privacy', (_req, res) => res.type('html').send(renderLegalHtml('Privacy Policy', privacySections)));
 app.get('/terms', (_req, res) => res.type('html').send(renderLegalHtml('Terms of Service', termsSections)));
 
-const supabaseUrl = (process.env.SUPABASE_URL ?? process.env.EXPO_PUBLIC_SUPABASE_URL ?? 'https://vfwdrpvfcvwsrhxuabak.supabase.co').trim();
-const supabaseAnonKey = (process.env.SUPABASE_ANON_KEY ?? process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY ?? 'sb_publishable_c7Dqa3N6mHOmrN64oPDkHw_saVtTEFK').trim();
-// Only enforce strict authentication gate when explicitly configured (e.g. In test suites).
-// For the APK, users can transcribe immediately out of the box, and signed-in users still get verified.
-const requireAuth = process.env.REQUIRE_AUTH === 'true';
+const supabaseUrl = (process.env.SUPABASE_URL ?? '').trim();
+const supabaseAnonKey = (process.env.SUPABASE_ANON_KEY ?? '').trim();
+// Production must never silently run as an unauthenticated AI proxy.
+const requireAuth = isProduction || process.env.REQUIRE_AUTH === 'true';
 
 
 async function authMiddleware(req, res, next) {
   // Try to verify the Bearer token if present (applies to both web signed-in and mobile)
   const authHeader = req.headers.authorization;
-  if (authHeader && authHeader.startsWith('Bearer ') && supabaseUrl) {
+  if (authHeader && authHeader.startsWith('Bearer ') && supabaseUrl && supabaseAnonKey) {
     try {
       const resp = await fetch(`${supabaseUrl}/auth/v1/user`, {
         headers: { Authorization: authHeader, apikey: supabaseAnonKey },
@@ -209,7 +234,7 @@ async function authMiddleware(req, res, next) {
   }
 
   const clientType = req.headers['x-client-type'];
-  const isWebGuest = clientType === 'web' && !req.user;
+  const isWebGuest = !isProduction && clientType === 'web' && !req.user;
 
   if (isWebGuest) {
     // Web guest: apply per-IP daily limit instead of auth
@@ -226,7 +251,23 @@ async function authMiddleware(req, res, next) {
     return next();
   }
 
-  // All other clients (mobile, API, test suite) require auth when requireAuth is true
+  const isMobileGuest = clientType === 'mobile' && !req.user;
+  if (isMobileGuest) {
+    const requestKey = `${req.path}:${String(req.headers['idempotency-key'] || req.body?.noteId || '').trim()}`;
+    if (isMobileGuestLimited(req.ip, requestKey)) {
+      return res.status(429).json({
+        error: 'Your free guest transcriptions are used up for today. Sign in to continue using VoicePad AI.',
+        guestLimitReached: true,
+        signInRequired: true,
+        dailyLimit: MOBILE_GUEST_DAILY_LIMIT,
+        requestId: req.requestId,
+      });
+    }
+    req.isMobileGuest = true;
+    return next();
+  }
+
+  // All non-guest clients require auth when production/auth mode is enabled.
   if (requireAuth && !req.user) {
     return res.status(401).json({ error: 'Authentication required. Please sign in to use VoicePad AI.', requestId: req.requestId });
   }
@@ -236,7 +277,7 @@ async function authMiddleware(req, res, next) {
 
 
 
-app.get('/models', async (_req, res) => {
+app.get('/models', authMiddleware, rateLimitMiddleware, async (_req, res) => {
   if (!process.env.GROQ_API_KEY && groqKeys.length === 0) return res.status(500).json({ error: 'GROQ_API_KEY is not configured on the server.' });
   try {
     const activeKey = groqKeys[0] || process.env.GROQ_API_KEY;
@@ -562,6 +603,9 @@ app.post('/transcribe', authMiddleware, rateLimitMiddleware, idempotencyMiddlewa
             base64 = match[2];
           }
         }
+        if (!/^[A-Za-z0-9+/]*={0,2}$/.test(base64) || base64.length % 4 === 1) {
+          return res.status(400).json({ error: 'Invalid base64 audio data.' });
+        }
         try {
           audioBuffer = Buffer.from(base64, 'base64');
         } catch {}
@@ -753,9 +797,15 @@ app.post('/summarize', authMiddleware, rateLimitMiddleware, idempotencyMiddlewar
 app.post('/ocr', authMiddleware, rateLimitMiddleware, idempotencyMiddleware, upload.single('image'), async (req, res) => {
   let base64Data = '';
   let mimeType = 'image/jpeg';
+  let tempDiskFile = null;
 
   if (req.file) {
-    base64Data = req.file.buffer.toString('base64');
+    tempDiskFile = req.file.path;
+    try {
+      base64Data = (await fs.promises.readFile(req.file.path)).toString('base64');
+    } catch {
+      return res.status(400).json({ error: 'Could not read the uploaded image.' });
+    }
     mimeType = req.file.mimetype || 'image/jpeg';
   } else if (req.body?.image) {
     const raw = req.body.image;
@@ -775,18 +825,20 @@ app.post('/ocr', authMiddleware, rateLimitMiddleware, idempotencyMiddleware, upl
   }
 
   if (!base64Data || base64Data.length > 20 * 1024 * 1024) {
+    if (tempDiskFile) fs.promises.unlink(tempDiskFile).catch(() => {});
     return res.status(413).json({ error: 'Image is too large. Choose an image under 15 MB.' });
   }
 
   // 1. Primary: Google Gemini Vision (ultra-reliable on document/notes OCR)
   const geminiVision = await callGeminiVision(base64Data, mimeType);
-  if (geminiVision) {
-    return res.json(geminiVision);
+  try {
+    if (geminiVision) return res.json(geminiVision);
+    return res.status(502).json({
+      error: 'Could not transcribe image. All OCR providers exhausted. Please ensure the image is clear and retry.',
+    });
+  } finally {
+    if (tempDiskFile) fs.promises.unlink(tempDiskFile).catch(() => {});
   }
-
-  return res.status(502).json({
-    error: 'Could not transcribe image. All OCR providers exhausted. Please ensure the image is clear and retry.',
-  });
 });
 
 app.use((error, _req, res, _next) => {

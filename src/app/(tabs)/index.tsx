@@ -19,6 +19,7 @@ import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context'
 import { useFocusEffect, useRouter } from 'expo-router';
 import * as Haptics from 'expo-haptics';
 import Animated, { FadeInDown } from 'react-native-reanimated';
+import { Camera, FilePenLine, Mic, Pencil, Search, Sparkles, Trash2, X } from 'lucide-react-native';
 
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
@@ -312,7 +313,7 @@ export default function HomeScreen() {
                     style={styles.notepadBtn}
                     accessibilityLabel="Open Notepad"
                   >
-                    <ThemedText style={styles.notepadBtnText}>✏️ Notepad</ThemedText>
+                    <FilePenLine size={15} color={DS.colors.primary} strokeWidth={2.4} /><ThemedText style={styles.notepadBtnText}>Notepad</ThemedText>
                   </Pressable>
                 </View>
 
@@ -339,7 +340,7 @@ export default function HomeScreen() {
 
               {/* Search */}
               <View style={styles.searchBox}>
-                <ThemedText style={styles.searchIcon}>⌕</ThemedText>
+                <Search size={19} color={DS.colors.subtle} strokeWidth={2.2} />
                 <TextInput
                   value={search}
                   onChangeText={setSearch}
@@ -350,7 +351,7 @@ export default function HomeScreen() {
                 />
                 {search.length > 0 && (
                   <Pressable onPress={() => setSearch('')}>
-                    <ThemedText style={styles.searchClear}>×</ThemedText>
+                    <X size={18} color={DS.colors.muted} strokeWidth={2.2} />
                   </Pressable>
                 )}
               </View>
@@ -372,9 +373,7 @@ export default function HomeScreen() {
                     <ThemedText
                       style={[styles.toggleBtnText, filterSource === mode && styles.toggleBtnTextActive]}
                     >
-                      {mode === 'voice'
-                        ? `🎙️ Voice (${voiceCount})`
-                        : `📋 All (${notes.length})`}
+                      {mode === 'voice' ? `Voice (${voiceCount})` : `All notes (${notes.length})`}
                     </ThemedText>
                   </Pressable>
                 ))}
@@ -412,7 +411,7 @@ export default function HomeScreen() {
 
               {!isLoading && filteredNotes.length === 0 && (
                 <View style={styles.emptyState}>
-                  <ThemedText style={styles.emptyIcon}>🎙️</ThemedText>
+                  <View style={styles.emptyIcon}><Mic size={30} color={DS.colors.primary} strokeWidth={2.2} /></View>
                   <ThemedText style={styles.emptyTitle}>Start your first voice note</ThemedText>
                   <ThemedText style={styles.emptySubtitle}>
                     Tap the mic below to record. VoicePad transcribes your audio and creates AI summaries automatically.
@@ -422,14 +421,14 @@ export default function HomeScreen() {
                     style={styles.emptyCta}
                     accessibilityRole="button"
                   >
-                    <ThemedText style={styles.emptyCtaText}>🎙️ Record now</ThemedText>
+                    <Mic size={18} color={DS.colors.white} strokeWidth={2.5} /><ThemedText style={styles.emptyCtaText}>Record now</ThemedText>
                   </Pressable>
                   <Pressable
                     onPress={() => router.push('/scan')}
                     style={styles.emptyCtaSecondary}
                     accessibilityRole="button"
                   >
-                    <ThemedText style={styles.emptyCtaSecondaryText}>📷 Or scan a photo</ThemedText>
+                    <Camera size={16} color={DS.colors.muted} strokeWidth={2.2} /><ThemedText style={styles.emptyCtaSecondaryText}>Or scan a photo</ThemedText>
                   </Pressable>
                 </View>
               )}
@@ -452,7 +451,7 @@ export default function HomeScreen() {
           accessibilityLabel="Record a voice note"
           accessibilityRole="button"
         >
-          <ThemedText style={styles.fabText}>🎙️</ThemedText>
+          <Mic size={28} color={DS.colors.white} strokeWidth={2.4} />
         </Pressable>
 
         {/* Action tray (long-press) */}
@@ -462,7 +461,7 @@ export default function HomeScreen() {
             style={[styles.actionTray, { bottom: Math.max(insets.bottom, 16) + 10 }]}
           >
             <View style={styles.trayThumb}>
-              <ThemedText style={styles.trayThumbText}>✦</ThemedText>
+              <Sparkles size={19} color={DS.colors.primary} strokeWidth={2.2} />
             </View>
             <Pressable
               onPress={() => {
@@ -473,7 +472,7 @@ export default function HomeScreen() {
               accessibilityRole="button"
               accessibilityLabel="Edit note"
             >
-              <ThemedText style={styles.trayBtnText}>✎ Edit</ThemedText>
+              <Pencil size={15} color={DS.colors.ink} strokeWidth={2.2} /><ThemedText style={styles.trayBtnText}>Edit</ThemedText>
             </Pressable>
             <Pressable
               onPress={() => deleteNote(selectedNote)}
@@ -481,7 +480,7 @@ export default function HomeScreen() {
               accessibilityRole="button"
               accessibilityLabel="Delete note"
             >
-              <ThemedText style={styles.trayBtnText}>🗑 Delete</ThemedText>
+              <Trash2 size={15} color={DS.colors.danger} strokeWidth={2.2} /><ThemedText style={[styles.trayBtnText, { color: DS.colors.danger }]}>Delete</ThemedText>
             </Pressable>
             <Pressable
               onPress={() => setSelectedNote(null)}
@@ -489,7 +488,7 @@ export default function HomeScreen() {
               accessibilityRole="button"
               accessibilityLabel="Close actions"
             >
-              <ThemedText style={styles.trayBtnCloseText}>×</ThemedText>
+              <X size={17} color={DS.colors.muted} strokeWidth={2.2} />
             </Pressable>
           </Animated.View>
         )}
@@ -511,7 +510,7 @@ export default function HomeScreen() {
             <View style={styles.composerHeader}>
               <ThemedText style={styles.composerTitle}>New text note</ThemedText>
               <Pressable onPress={() => setIsComposerOpen(false)}>
-                <ThemedText style={styles.composerClose}>×</ThemedText>
+                <X size={20} color={DS.colors.muted} strokeWidth={2.2} />
               </Pressable>
             </View>
             <TextInput
@@ -547,32 +546,33 @@ const styles = StyleSheet.create({
     width: '100%',
     maxWidth: 760,
     alignSelf: 'center',
-    paddingHorizontal: 18,
-    paddingTop: 16,
+    paddingHorizontal: 20,
+    paddingTop: 20,
   },
 
   // Hero card
   heroCard: {
-    backgroundColor: DS.colors.surface,
+    backgroundColor: DS.colors.ink,
     borderRadius: DS.radius.xl,
-    padding: 20,
+    padding: 22,
     marginBottom: 16,
     borderWidth: 1,
-    borderColor: DS.colors.border,
-    ...DS.shadow.card,
+    borderColor: DS.colors.inkSoft,
+    ...DS.shadow.elevated,
   },
   heroRow: { flexDirection: 'row', alignItems: 'center', marginBottom: 18 },
   avatar: {
     width: 50, height: 50, borderRadius: 25,
-    backgroundColor: DS.colors.primaryLight,
-    borderWidth: 2, borderColor: DS.colors.primary,
+    backgroundColor: DS.colors.primary,
+    borderWidth: 2, borderColor: DS.colors.accent,
     alignItems: 'center', justifyContent: 'center',
   },
-  avatarText: { color: DS.colors.primary, fontSize: DS.font.h2, fontWeight: '800' },
+  avatarText: { color: DS.colors.white, fontSize: DS.font.h2, fontWeight: '800' },
   greetingBlock: { flex: 1, marginLeft: 14 },
-  greetingSmall: { color: DS.colors.subtle, fontSize: DS.font.xxs },
-  greetingName: { color: DS.colors.ink, fontSize: DS.font.h3, fontWeight: '800', marginTop: 1 },
+  greetingSmall: { color: '#B7B7D2', fontSize: DS.font.xxs },
+  greetingName: { color: DS.colors.white, fontSize: DS.font.h3, fontWeight: '800', marginTop: 1 },
   notepadBtn: {
+    flexDirection: 'row', alignItems: 'center', gap: 6,
     backgroundColor: DS.colors.primaryLight,
     borderRadius: DS.radius.sm,
     paddingHorizontal: 12,
@@ -581,14 +581,14 @@ const styles = StyleSheet.create({
   notepadBtnText: { color: DS.colors.primary, fontSize: DS.font.xxs, fontWeight: '800' },
   statsRow: {
     flexDirection: 'row',
-    backgroundColor: DS.colors.canvas,
+    backgroundColor: 'rgba(255,255,255,0.08)',
     borderRadius: DS.radius.md,
     padding: 14,
     alignItems: 'center',
   },
   statItem: { flex: 1, alignItems: 'center' },
-  statValue: { color: DS.colors.primary, fontSize: DS.font.h1, fontWeight: '800' },
-  statLabel: { color: DS.colors.muted, fontSize: DS.font.caption, marginTop: 2, fontWeight: '600' },
+  statValue: { color: '#B9B1FF', fontSize: DS.font.h1, fontWeight: '800' },
+  statLabel: { color: '#B7B7D2', fontSize: DS.font.caption, marginTop: 2, fontWeight: '600' },
   statDivider: { width: 1, height: 30, backgroundColor: DS.colors.border },
 
   // Search
@@ -659,7 +659,7 @@ const styles = StyleSheet.create({
     marginTop: 14,
     ...DS.shadow.card,
   },
-  emptyIcon: { fontSize: 48, marginBottom: 14 },
+  emptyIcon: { width: 62, height: 62, borderRadius: 31, backgroundColor: DS.colors.primaryLight, alignItems: 'center', justifyContent: 'center', marginBottom: 14 },
   emptyTitle: { color: DS.colors.ink, fontSize: DS.font.h2, fontWeight: '800', textAlign: 'center' },
   emptySubtitle: {
     color: DS.colors.muted,
@@ -668,6 +668,7 @@ const styles = StyleSheet.create({
     marginTop: 10,
   },
   emptyCta: {
+    flexDirection: 'row', gap: 8, alignItems: 'center',
     backgroundColor: DS.colors.orange,
     borderRadius: DS.radius.md,
     paddingHorizontal: 24, paddingVertical: 14,
@@ -676,6 +677,7 @@ const styles = StyleSheet.create({
   },
   emptyCtaText: { color: '#FFFFFF', fontSize: DS.font.bodyMd, fontWeight: '800' },
   emptyCtaSecondary: {
+    flexDirection: 'row', gap: 7, alignItems: 'center',
     marginTop: 12,
     paddingHorizontal: 20, paddingVertical: 10,
   },
@@ -776,6 +778,7 @@ const styles = StyleSheet.create({
   },
   trayThumbText: { color: DS.colors.primary, fontSize: DS.font.body },
   trayBtn: {
+    flexDirection: 'row', alignItems: 'center', gap: 6,
     backgroundColor: DS.colors.surfaceDim,
     borderRadius: DS.radius.sm,
     paddingHorizontal: 14, paddingVertical: 10,

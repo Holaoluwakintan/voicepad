@@ -22,6 +22,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import * as Haptics from 'expo-haptics';
 import * as Clipboard from 'expo-clipboard';
 import * as DocumentPicker from 'expo-document-picker';
+import { AlertCircle, ArrowLeft, FileAudio, LockKeyhole, Mic, RotateCcw, Square, Upload } from 'lucide-react-native';
 import Animated, {
   useSharedValue,
   useAnimatedStyle,
@@ -90,7 +91,6 @@ export default function RecordScreen() {
   const [copied, setCopied] = useState(false);
   const [selectedLanguage, setSelectedLanguage] = useState<LangCode>('auto');
   const [transcribingMsg, setTranscribingMsg] = useState('Sending to AI…');
-  const [showLangPicker, setShowLangPicker] = useState(false);
   const [isPaused, setIsPaused] = useState(false);
 
   // Pulse animation
@@ -359,7 +359,10 @@ export default function RecordScreen() {
     } catch (error) {
       clearInterval(msgTimer);
       const isAuthError = error instanceof Error && error.message === 'AUTH_REQUIRED';
-      const message = isAuthError
+      const isGuestLimit = error instanceof Error && error.message === 'GUEST_LIMIT_REACHED';
+      const message = isGuestLimit
+        ? 'Your free guest transcriptions are used up for today. Sign in to continue using AI transcription.'
+        : isAuthError
         ? 'Sign in required. Go to Profile → Sign In to use AI transcription.'
         : toFriendlyErrorMessage(error, 'Transcription could not be completed. Please try again.');
       await updateNote(noteId, { transcriptionStatus: 'failed', transcriptionError: message });
@@ -420,7 +423,7 @@ export default function RecordScreen() {
               accessibilityLabel="Close recorder"
               accessibilityRole="button"
             >
-              <ThemedText style={styles.closeBtnText}>×</ThemedText>
+              <ArrowLeft size={21} color={DARK_TEXT} strokeWidth={2.4} />
             </Pressable>
             <ThemedText style={styles.headerTitle}>
               {savedUri && !isRecording ? 'Your recording' : 'New voice note'}
@@ -452,10 +455,10 @@ export default function RecordScreen() {
           {transcriptState === 'ready' && transcriptText ? (
             <View style={styles.transcriptBox}>
               <View style={styles.transcriptHeader}>
-                <ThemedText style={styles.transcriptLabel}>📝 Transcript</ThemedText>
+                <View style={styles.inlineLabel}><FileAudio size={16} color={DARK_TEXT} strokeWidth={2.2} /><ThemedText style={styles.transcriptLabel}>Transcript</ThemedText></View>
                 <Pressable onPress={copyTranscript} style={styles.copyBtn} accessibilityRole="button">
                   <ThemedText style={styles.copyBtnText}>
-                    {copied ? '✓ Copied!' : '📋 Copy'}
+                    {copied ? 'Copied' : 'Copy'}
                   </ThemedText>
                 </Pressable>
               </View>
@@ -465,8 +468,8 @@ export default function RecordScreen() {
             </View>
           ) : transcriptState === 'transcribing' ? (
             <View style={styles.transcribingBox}>
-              <ThemedText style={styles.transcribingText}>
-                ⏳  {transcribingMsg}{'\n'}
+              <View style={styles.progressIcon}><RotateCcw size={19} color={DS.colors.accent} strokeWidth={2.2} /></View><ThemedText style={styles.transcribingText}>
+                {transcribingMsg}{'\n'}
                 <ThemedText style={styles.transcribingNote}>
                   Connecting to AI service. (If the server is waking up, this may take ~30s).
                 </ThemedText>
@@ -477,13 +480,13 @@ export default function RecordScreen() {
                 accessibilityRole="button"
                 accessibilityLabel="Return to notes feed"
               >
-                <ThemedText style={styles.bgContinueBtnText}>➔ Return to Notes (transcribes in background)</ThemedText>
+                <ArrowLeft size={15} color={DARK_TEXT} strokeWidth={2.2} /><ThemedText style={styles.bgContinueBtnText}>Return to Notes</ThemedText>
               </Pressable>
             </View>
           ) : transcriptState === 'failed' ? (
             <View style={styles.errorBox}>
-              <ThemedText style={styles.errorText}>⚠️ {transcriptError || 'Transcription failed.'}</ThemedText>
-              {transcriptError.includes('Sign in') && (
+              <View style={styles.inlineLabel}><AlertCircle size={17} color={DS.colors.danger} strokeWidth={2.2} /><ThemedText style={styles.errorText}>{transcriptError || 'Transcription failed.'}</ThemedText></View>
+              {(transcriptError.includes('Sign in') || transcriptError.includes('sign in')) && (
                 <Pressable
                   onPress={() => router.push('/(tabs)/profile')}
                   style={styles.signInToRetryBtn}
@@ -504,7 +507,7 @@ export default function RecordScreen() {
                 {/* Guest Mode notice banner */}
                 {!user && (
                   <View style={styles.authNoticeCard}>
-                    <ThemedText style={styles.authNoticeIcon}>🔒</ThemedText>
+                    <LockKeyhole size={19} color={DS.colors.accent} strokeWidth={2.2} />
                     <View style={styles.authNoticeContent}>
                       <ThemedText style={styles.authNoticeTitle}>Guest Mode</ThemedText>
                       <ThemedText style={styles.authNoticeSub}>
@@ -558,7 +561,7 @@ export default function RecordScreen() {
                     accessibilityLabel="Start recording"
                     accessibilityRole="button"
                   >
-                    <View style={styles.recordDot} />
+                    <Mic size={31} color={DARK_TEXT} strokeWidth={2.1} />
                   </Pressable>
                 </View>
                 <ThemedText style={styles.hint}>Tap to start recording</ThemedText>
@@ -577,7 +580,7 @@ export default function RecordScreen() {
                   accessibilityLabel="Upload audio file to transcribe"
                   accessibilityRole="button"
                 >
-                  <ThemedText style={styles.uploadBtnText}>📁  Upload Audio File</ThemedText>
+                  <View style={styles.uploadTitle}><Upload size={17} color={DARK_TEXT} strokeWidth={2.2} /><ThemedText style={styles.uploadBtnText}>Upload audio file</ThemedText></View>
                   <ThemedText style={styles.uploadBtnSub}>
                     MP3, M4A, WAV, OGG, AAC, FLAC
                   </ThemedText>
@@ -596,11 +599,11 @@ export default function RecordScreen() {
                     accessibilityLabel="Stop recording"
                     accessibilityRole="button"
                   >
-                    <View style={styles.stopSquare} />
+                    <Square size={24} color={DARK_TEXT} fill={DARK_TEXT} strokeWidth={2} />
                   </Pressable>
                 </View>
                 <ThemedText style={styles.hint}>
-                  {isPaused ? 'Paused · Tap Stop to save or Resume' : 'Tap Stop to save recording'}
+                  {isPaused ? 'Paused · resume when ready' : 'Tap stop when you are done'}
                 </ThemedText>
 
                 {/* Pause / Resume button */}
@@ -611,7 +614,7 @@ export default function RecordScreen() {
                   accessibilityLabel={isPaused ? 'Resume recording' : 'Pause recording'}
                 >
                   <ThemedText style={styles.pauseResumeBtnText}>
-                    {isPaused ? '▶  Resume Recording' : '⏸  Pause Recording'}
+                    {isPaused ? 'Resume recording' : 'Pause recording'}
                   </ThemedText>
                 </Pressable>
               </View>
@@ -626,7 +629,7 @@ export default function RecordScreen() {
                       onPress={goToNote}
                       style={({ pressed }) => [styles.openNoteBtn, pressed && styles.pressed]}
                     >
-                      <ThemedText style={styles.openNoteBtnText}>Open full note ➔</ThemedText>
+                      <ThemedText style={styles.openNoteBtnText}>Open full note</ThemedText>
                     </Pressable>
                     <Pressable onPress={discardRecording} style={styles.discardBtn}>
                       <ThemedText style={styles.discardBtnText}>Discard recording</ThemedText>
@@ -647,10 +650,10 @@ export default function RecordScreen() {
   );
 }
 
-const DARK_BG = '#141222';
+const DARK_BG = DS.colors.ink;
 const DARK_TEXT = '#FFFFFF';
-const MUTED_TEXT = '#918DA1';
-const ACCENT = DS.colors.primary;
+const MUTED_TEXT = '#9B9CB5';
+const ACCENT = DS.colors.accent;
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: DARK_BG },
@@ -706,12 +709,12 @@ const styles = StyleSheet.create({
 
   // Transcript
   transcriptBox: {
-    backgroundColor: 'rgba(109,93,251,0.14)',
+    backgroundColor: 'rgba(113,101,248,0.16)',
     borderRadius: DS.radius.lg,
     padding: 18,
     marginBottom: 16,
     borderWidth: 1,
-    borderColor: 'rgba(109,93,251,0.35)',
+    borderColor: 'rgba(155,140,255,0.36)',
   },
   transcriptHeader: {
     flexDirection: 'row',
@@ -719,6 +722,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     marginBottom: 12,
   },
+  inlineLabel: { flexDirection: 'row', alignItems: 'center', gap: 8 },
   transcriptLabel: { color: DARK_TEXT, fontSize: DS.font.sm, fontWeight: '800' },
   copyBtn: {
     backgroundColor: ACCENT,
@@ -730,12 +734,13 @@ const styles = StyleSheet.create({
   transcriptText: { color: '#E0DEFF', fontSize: DS.font.bodyMd, lineHeight: 26 },
 
   transcribingBox: {
-    backgroundColor: 'rgba(255,255,255,0.06)',
+    backgroundColor: 'rgba(255,255,255,0.07)',
     borderRadius: DS.radius.lg,
     padding: 22,
     marginBottom: 16,
     alignItems: 'center',
   },
+  progressIcon: { width: 38, height: 38, borderRadius: 19, backgroundColor: DS.colors.primaryLight, alignItems: 'center', justifyContent: 'center', marginBottom: 10 },
   transcribingText: {
     color: DARK_TEXT,
     fontSize: DS.font.bodyMd,
@@ -746,12 +751,12 @@ const styles = StyleSheet.create({
   transcribingNote: { color: MUTED_TEXT, fontSize: DS.font.xs, fontWeight: '400' },
 
   errorBox: {
-    backgroundColor: 'rgba(239,84,114,0.12)',
+    backgroundColor: 'rgba(228,91,114,0.12)',
     borderRadius: DS.radius.lg,
     padding: 18,
     marginBottom: 16,
     borderWidth: 1,
-    borderColor: 'rgba(239,84,114,0.3)',
+    borderColor: 'rgba(228,91,114,0.32)',
   },
   errorText: { color: '#EF5472', fontSize: DS.font.sm, lineHeight: 22 },
 
@@ -821,7 +826,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     borderWidth: 8,
-    borderColor: 'rgba(109,93,251,0.35)',
+    borderColor: 'rgba(155,140,255,0.36)',
     zIndex: 10,
   },
   recordDot: { width: 31, height: 31, borderRadius: 16, backgroundColor: '#EF5472' },
@@ -855,6 +860,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: 6,
   },
+  uploadTitle: { flexDirection: 'row', alignItems: 'center', gap: 8 },
   uploadBtnText: {
     color: DARK_TEXT,
     fontSize: DS.font.h3,

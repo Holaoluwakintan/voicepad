@@ -66,6 +66,9 @@ async function performTranscriptionAttempt(
       if (status === 401) {
         throw new Error('AUTH_REQUIRED');
       }
+      if (status === 429 && payload?.guestLimitReached) {
+        throw new Error('GUEST_LIMIT_REACHED');
+      }
       if (status >= 200 && status < 300 && payload?.text && typeof payload.text === 'string') {
         return { text: payload.text.trim() };
       }
@@ -112,6 +115,9 @@ async function performTranscriptionAttempt(
         const jsonPayload = await jsonResponse.json().catch(() => null);
         if (jsonResponse.status === 401) {
           throw new Error('AUTH_REQUIRED');
+        }
+        if (jsonResponse.status === 429 && jsonPayload?.guestLimitReached) {
+          throw new Error('GUEST_LIMIT_REACHED');
         }
         if (jsonResponse.ok && jsonPayload?.text && typeof jsonPayload.text === 'string') {
           return { text: jsonPayload.text.trim() };
@@ -181,6 +187,12 @@ async function performTranscriptionAttempt(
       const payload = await response.json().catch(() => null);
       if (response.status === 401) {
         throw new Error('AUTH_REQUIRED');
+      }
+      if (response.status === 429 && payload?.guestLimitReached) {
+        throw new Error('GUEST_LIMIT_REACHED');
+      }
+      if (response.status === 429 && payload?.guestLimitReached) {
+        throw new Error('GUEST_LIMIT_REACHED');
       }
       if (response.ok && payload?.text && typeof payload.text === 'string') {
         return { text: payload.text.trim() };
@@ -268,6 +280,9 @@ export async function transcribeAudio(
     if (rawMsg.includes('AUTH_REQUIRED')) {
       throw new Error('AUTH_REQUIRED');
     }
+    if (rawMsg.includes('GUEST_LIMIT_REACHED')) {
+      throw new Error('GUEST_LIMIT_REACHED');
+    }
     // Automatic 1x retry on cold-start timeouts or network drops
     const isRetryable =
       rawMsg.includes('timed out') ||
@@ -284,6 +299,9 @@ export async function transcribeAudio(
       } catch (secondError) {
         if (String(secondError).includes('AUTH_REQUIRED')) {
           throw new Error('AUTH_REQUIRED');
+        }
+        if (String(secondError).includes('GUEST_LIMIT_REACHED')) {
+          throw new Error('GUEST_LIMIT_REACHED');
         }
         throw new Error(toFriendlyErrorMessage(secondError, 'Transcription service is currently unavailable. Please retry shortly.'));
       }

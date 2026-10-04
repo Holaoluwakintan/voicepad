@@ -19,6 +19,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import * as Clipboard from 'expo-clipboard';
 import * as Haptics from 'expo-haptics';
 import Animated, { FadeInDown } from 'react-native-reanimated';
+import { FilePenLine, Search, Share2, X } from 'lucide-react-native';
 
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
@@ -186,7 +187,7 @@ export default function NotesScreen() {
                   accessibilityLabel={mode === 'write' ? 'Write mode' : 'Saved notes'}
                 >
                   <ThemedText style={[styles.tabBtnText, tabMode === mode && styles.tabBtnTextActive]}>
-                    {mode === 'write' ? '✏️ Write' : `📚 Saved (${notepadNotes.length})`}
+                    {mode === 'write' ? 'Write' : `Saved (${notepadNotes.length})`}
                   </ThemedText>
                 </Pressable>
               ))}
@@ -237,7 +238,7 @@ export default function NotesScreen() {
                   accessibilityLabel="Save note"
                 >
                   <ThemedText style={styles.primaryActionText}>
-                    {isSaving ? 'Saving…' : editingNoteId ? '💾 Update' : '💾 Save'}
+                    {isSaving ? 'Saving…' : editingNoteId ? 'Update' : 'Save'}
                   </ThemedText>
                 </Pressable>
                 <Pressable
@@ -247,7 +248,7 @@ export default function NotesScreen() {
                   accessibilityLabel="Copy note"
                 >
                   <ThemedText style={styles.secondaryActionText}>
-                    {copiedMessage ? '✓ Copied' : '📋 Copy'}
+                    {copiedMessage ? 'Copied' : 'Copy'}
                   </ThemedText>
                 </Pressable>
                 <Pressable
@@ -256,7 +257,7 @@ export default function NotesScreen() {
                   style={[styles.secondaryActionBtn, !noteContent.trim() && styles.disabledBtn]}
                   accessibilityLabel="Share note"
                 >
-                  <ThemedText style={styles.secondaryActionText}>↗ Share</ThemedText>
+                  <Share2 size={15} color={DS.colors.muted} strokeWidth={2.1} /><ThemedText style={styles.secondaryActionText}>Share</ThemedText>
                 </Pressable>
               </View>
 
@@ -300,7 +301,7 @@ export default function NotesScreen() {
               keyboardShouldPersistTaps="handled"
             >
               <View style={styles.searchBox}>
-                <ThemedText style={styles.searchIcon}>⌕</ThemedText>
+                <Search size={18} color={DS.colors.subtle} strokeWidth={2.1} />
                 <TextInput
                   value={searchQuery}
                   onChangeText={setSearchQuery}
@@ -310,14 +311,14 @@ export default function NotesScreen() {
                 />
                 {searchQuery.length > 0 && (
                   <Pressable onPress={() => setSearchQuery('')}>
-                    <ThemedText style={styles.clearSearch}>×</ThemedText>
+                    <X size={18} color={DS.colors.muted} strokeWidth={2.1} />
                   </Pressable>
                 )}
               </View>
 
               {displayedSavedNotes.length === 0 ? (
                 <View style={styles.emptySavedState}>
-                  <ThemedText style={styles.emptyIcon}>📝</ThemedText>
+                  <View style={styles.emptyIcon}><FilePenLine size={27} color={DS.colors.primary} strokeWidth={2.1} /></View>
                   <ThemedText style={styles.emptyTitle}>
                     {searchQuery ? 'No matching notes' : 'Your Notepad is empty'}
                   </ThemedText>
@@ -328,7 +329,7 @@ export default function NotesScreen() {
                   </ThemedText>
                   {!searchQuery && (
                     <Pressable onPress={handleNewNote} style={styles.createFirstBtn} accessibilityLabel="Write a note">
-                      <ThemedText style={styles.createFirstBtnText}>✏️ Write a Note</ThemedText>
+                      <FilePenLine size={16} color={DS.colors.white} strokeWidth={2.2} /><ThemedText style={styles.createFirstBtnText}>Write a Note</ThemedText>
                     </Pressable>
                   )}
                 </View>
@@ -418,6 +419,7 @@ const styles = StyleSheet.create({
 
   // Editor
   editorCard: {
+    borderTopWidth: 3, borderTopColor: DS.colors.primary,
     backgroundColor: DS.colors.surface,
     borderRadius: DS.radius.lg, borderWidth: 1, borderColor: DS.colors.border,
     padding: 18, marginTop: 8,
@@ -436,7 +438,7 @@ const styles = StyleSheet.create({
   statsText: { color: DS.colors.muted, fontSize: DS.font.xs, fontWeight: '600' },
   editingBadge: { color: DS.colors.primary, fontSize: DS.font.xs, fontWeight: '800' },
 
-  actionRow: { flexDirection: 'row', gap: 8, marginTop: 12 },
+  actionRow: { alignItems: 'center', flexDirection: 'row', gap: 8, marginTop: 12 },
   primaryActionBtn: {
     flex: 2, backgroundColor: DS.colors.primary, borderRadius: DS.radius.md,
     paddingVertical: 14, alignItems: 'center', ...DS.shadow.primary,
@@ -509,7 +511,12 @@ const styles = StyleSheet.create({
 
   // Empty state
   emptySavedState: { alignItems: 'center', paddingVertical: 50, gap: 10 },
-  emptyIcon: { fontSize: 48 },
+  emptyIcon: {
+    width: 58, height: 58, borderRadius: 29,
+    backgroundColor: DS.colors.primaryLight,
+    alignItems: 'center', justifyContent: 'center',
+    marginBottom: 12,
+  },
   emptyTitle: { color: DS.colors.ink, fontSize: DS.font.h3, fontWeight: '800' },
   emptySubtitle: { color: DS.colors.muted, fontSize: DS.font.sm, textAlign: 'center', maxWidth: 280 },
   createFirstBtn: {

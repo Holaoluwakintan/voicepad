@@ -5,12 +5,9 @@
 import { useState } from 'react';
 import {
   Alert,
-  Platform,
   Pressable,
   ScrollView,
   StyleSheet,
-  Switch,
-  Text,
   View,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -21,7 +18,6 @@ import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
 import { useAuth } from '@/lib/auth';
 import { DS } from '@/constants/design';
-import { supabase } from '@/lib/supabase';
 
 type PlanTier = 'annual' | 'monthly';
 
@@ -36,11 +32,11 @@ const PRO_FEATURES = [
 
 export default function UpgradeScreen() {
   const router = useRouter();
-  const { user } = useAuth();
+  useAuth();
   const [selectedPlan, setSelectedPlan] = useState<PlanTier>('annual');
   const [isProcessing, setIsProcessing] = useState(false);
 
-  const isCurrentPro = Boolean(user?.user_metadata?.is_pro);
+  const isCurrentPro = false;
 
   async function handleSelectPlan(plan: PlanTier) {
     try { await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light); } catch {}
@@ -49,37 +45,11 @@ export default function UpgradeScreen() {
 
   async function handleSubscribe() {
     try { await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium); } catch {}
-    setIsProcessing(true);
-
-    // If user is logged in, toggle their pro metadata in Supabase
-    if (supabase && user) {
-      try {
-        const { error } = await supabase.auth.updateUser({
-          data: { is_pro: true, pro_plan: selectedPlan, pro_activated_at: new Date().toISOString() },
-        });
-        if (error) throw error;
-        try { await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success); } catch {}
-        Alert.alert(
-          '🎉 Welcome to VoicePad Pro!',
-          `Your ${selectedPlan === 'annual' ? 'Annual' : 'Monthly'} Pro plan is now active. All ads have been removed and limits lifted.`,
-          [{ text: 'Awesome!', onPress: () => router.back() }]
-        );
-      } catch (err: any) {
-        Alert.alert('Activation Note', 'Pro entitlement applied for this session. Sign in to sync across all devices.');
-        router.back();
-      } finally {
-        setIsProcessing(false);
-      }
-    } else {
-      // Guest mode sandbox activation
-      try { await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success); } catch {}
-      Alert.alert(
-        '🎉 VoicePad Pro Activated!',
-        'You are now in Pro mode. To ensure your subscription syncs across other devices, remember to create an account in Profile.',
-        [{ text: 'Start Using Pro', onPress: () => router.back() }]
-      );
-      setIsProcessing(false);
-    }
+    Alert.alert(
+      'VoicePad Pro is coming soon',
+      'Subscriptions are not connected yet. Your account has not been charged and no entitlement was changed.',
+      [{ text: 'Got it' }]
+    );
   }
 
   async function handleRestorePurchases() {
@@ -211,7 +181,7 @@ export default function UpgradeScreen() {
           </Pressable>
 
           <ThemedText style={styles.guaranteeText}>
-            🔒 Secured with Store Payments. Cancel easily anytime in settings.
+            No payment is taken while subscriptions are being prepared.
           </ThemedText>
 
           {/* Footer links */}

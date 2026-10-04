@@ -4,6 +4,7 @@ import { useState } from 'react';
 import { StyleSheet, View } from 'react-native';
 import Animated, { Easing, Keyframe } from 'react-native-reanimated';
 import { scheduleOnRN } from 'react-native-worklets';
+import { DS } from '@/constants/design';
 
 const DURATION = 600;
 
@@ -65,7 +66,7 @@ const styles = StyleSheet.create({
   },
   splashOverlay: {
     ...StyleSheet.absoluteFill,
-    backgroundColor: '#208AEF',
+    backgroundColor: DS.colors.ink,
     alignItems: 'center',
     justifyContent: 'center',
     zIndex: 1000,

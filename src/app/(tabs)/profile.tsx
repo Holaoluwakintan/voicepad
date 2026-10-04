@@ -29,6 +29,7 @@ import { loadNotes, Note } from '@/lib/notes';
 import { syncNotes } from '@/lib/sync';
 import { DS } from '@/constants/design';
 import Constants from 'expo-constants';
+import { Cloud, Edit3, LogOut, ShieldCheck } from 'lucide-react-native';
 
 export default function ProfileScreen() {
   const router = useRouter();
@@ -234,7 +235,7 @@ export default function ProfileScreen() {
                 style={styles.editNameBtn}
                 accessibilityLabel="Edit display name"
               >
-                <ThemedText style={styles.editNameBtnText}>✎ Edit display name</ThemedText>
+                <Edit3 size={15} color={DS.colors.primary} strokeWidth={2.1} /><ThemedText style={styles.editNameBtnText}>Edit display name</ThemedText>
               </Pressable>
             )}
           </View>
@@ -253,15 +254,13 @@ export default function ProfileScreen() {
             accessibilityRole="button"
             accessibilityLabel="VoicePad Pro subscription"
           >
-            <ThemedText style={styles.proCrownIcon}>✨</ThemedText>
+            <ShieldCheck size={22} color={DS.colors.accent} strokeWidth={2.1} />
             <View style={{ flex: 1, marginLeft: 12 }}>
               <ThemedText style={styles.proBannerTitle}>
-                {user?.user_metadata?.is_pro ? 'VoicePad Pro Active' : 'Upgrade to VoicePad Pro'}
+                VoicePad Pro
               </ThemedText>
               <ThemedText style={styles.proBannerSub}>
-                {user?.user_metadata?.is_pro
-                  ? 'Manage your active plan and cloud sync'
-                  : 'Remove ads, unlock unlimited AI notes & priority models'}
+                Premium features and subscriptions are coming soon.
               </ThemedText>
             </View>
             <ThemedText style={styles.proBannerArrow}>›</ThemedText>
@@ -270,7 +269,7 @@ export default function ProfileScreen() {
           {/* ─── Cloud not configured notice ─── */}
           {!configured && (
             <View style={styles.noticeCard}>
-              <ThemedText style={styles.noticeIcon}>☁️</ThemedText>
+              <Cloud size={20} color={DS.colors.primary} strokeWidth={2.1} />
               <ThemedText style={styles.noticeTitle}>Cloud sync not connected</ThemedText>
               <ThemedText style={styles.noticeBody}>
                 VoicePad works fully offline. Add your Supabase keys to .env to enable multi-device sync and cloud backups.
@@ -409,12 +408,12 @@ export default function ProfileScreen() {
           {/* ─── Logged-in cloud sync section ─── */}
           {user && (
             <View style={styles.accountCard}>
-              <ThemedText style={styles.accountCardTitle}>☁️ Cloud sync & backup</ThemedText>
+              <View style={styles.inlineIconLabel}><Cloud size={17} color={DS.colors.primary} strokeWidth={2.1} /><ThemedText style={styles.accountCardTitle}>Cloud sync & backup</ThemedText></View>
               <ThemedText style={styles.accountCardBody}>
                 Voice notes and transcripts are securely backed up to your private cloud workspace.
               </ThemedText>
               {!!syncMessage && (
-                <ThemedText style={styles.syncMessage}>🟢 {syncMessage}</ThemedText>
+                <View style={styles.inlineIconLabel}><ShieldCheck size={15} color={DS.colors.success} strokeWidth={2.1} /><ThemedText style={styles.syncMessage}>{syncMessage}</ThemedText></View>
               )}
               <View style={styles.accountActions}>
                 <Pressable
@@ -433,7 +432,7 @@ export default function ProfileScreen() {
                   style={styles.signOutBtn}
                   accessibilityLabel="Sign out"
                 >
-                  <Text style={styles.signOutText}>Sign out</Text>
+                  <View style={styles.inlineIconLabel}><LogOut size={15} color={DS.colors.ink} strokeWidth={2.1} /><Text style={styles.signOutText}>Sign out</Text></View>
                 </Pressable>
               </View>
               <Pressable
@@ -624,6 +623,7 @@ const styles = StyleSheet.create({
     marginBottom: 20,
     ...DS.shadow.primary,
   },
+  inlineIconLabel: { flexDirection: 'row', alignItems: 'center', gap: 7 },
   proCrownIcon: {
     fontSize: 26,
   },

@@ -18,6 +18,7 @@ import * as ImagePicker from 'expo-image-picker';
 import * as Clipboard from 'expo-clipboard';
 import * as Haptics from 'expo-haptics';
 import Animated, { FadeIn, FadeInDown, FadeInUp } from 'react-native-reanimated';
+import { Camera, Check, Image as ImageIcon, Library, RefreshCw, ScanLine } from 'lucide-react-native';
 
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
@@ -202,7 +203,7 @@ export default function ScanScreen() {
                 style={({ pressed }) => [styles.actionCard, styles.actionCardCamera, pressed && styles.pressed]}
               >
                 <View style={styles.actionCardIconBadgeCamera}>
-                  <ThemedText style={styles.actionCardEmoji}>📷</ThemedText>
+                  <Camera size={26} color={DS.colors.primary} strokeWidth={2.1} />
                 </View>
                 <ThemedText style={styles.actionCardTitleCamera}>Take a Photo</ThemedText>
                 <ThemedText style={styles.actionCardSubCamera}>Snap single page or note</ThemedText>
@@ -216,7 +217,7 @@ export default function ScanScreen() {
                 style={({ pressed }) => [styles.actionCard, styles.actionCardGallery, pressed && styles.pressed]}
               >
                 <View style={styles.actionCardIconBadgeGallery}>
-                  <ThemedText style={styles.actionCardEmoji}>📚</ThemedText>
+                  <Library size={26} color={DS.colors.primary} strokeWidth={2.1} />
                 </View>
                 <ThemedText style={styles.actionCardTitleGallery}>Upload Photos / Books</ThemedText>
                 <ThemedText style={styles.actionCardSubGallery}>From library or files</ThemedText>
@@ -256,11 +257,11 @@ export default function ScanScreen() {
               {/* Result header */}
               <View style={styles.resultHeaderRow}>
                 <View style={styles.resultTitleBlock}>
-                  <ThemedText style={styles.resultLabel}>✅ Text extracted — review before saving</ThemedText>
+                  <View style={styles.inlineRow}><Check size={16} color={DS.colors.success} strokeWidth={2.5} /><ThemedText style={styles.resultLabel}>Text extracted — review before saving</ThemedText></View>
                   <ThemedText style={styles.resultTitle} numberOfLines={1}>{extractedTitle}</ThemedText>
                 </View>
                 <Pressable onPress={reset} style={styles.scanAgainBtn}>
-                  <ThemedText style={styles.scanAgainText}>🔄 Scan again</ThemedText>
+                  <RefreshCw size={15} color={DS.colors.primary} strokeWidth={2.2} /><ThemedText style={styles.scanAgainText}>Scan again</ThemedText>
                 </Pressable>
               </View>
 
@@ -284,7 +285,7 @@ export default function ScanScreen() {
                   style={({ pressed }) => [styles.secondaryBtn, pressed && styles.pressed]}
                 >
                   <ThemedText style={styles.secondaryBtnText}>
-                    {copied ? '✓ Copied!' : '📋 Copy text'}
+                    {copied ? 'Copied!' : 'Copy text'}
                   </ThemedText>
                 </Pressable>
 
@@ -298,7 +299,7 @@ export default function ScanScreen() {
                   ]}
                 >
                   <ThemedText style={styles.primaryBtnText}>
-                    {savedToNotes ? '✅ Saved to Notes!' : '💾 Save to Notes'}
+                    {savedToNotes ? 'Saved to Notes!' : 'Save to Notes'}
                   </ThemedText>
                 </Pressable>
               </View>
@@ -308,7 +309,7 @@ export default function ScanScreen() {
           {/* ─── ERROR: friendly error ─── */}
           {scanState === 'error' && (
             <Animated.View entering={FadeIn.duration(300)} style={styles.errorBox}>
-              <ThemedText style={styles.errorEmoji}>😕</ThemedText>
+              <View style={styles.errorEmoji}><ImageIcon size={26} color={DS.colors.danger} strokeWidth={2.1} /></View>
               <ThemedText style={styles.errorTitle}>{"Couldn't read the image"}</ThemedText>
               <ThemedText style={styles.errorMessage}>{errorMessage}</ThemedText>
               <Pressable onPress={reset} style={styles.retryBtn}>
@@ -323,15 +324,15 @@ export default function ScanScreen() {
               <ThemedText style={styles.tipsTitle}>Works great with</ThemedText>
               <View style={styles.tipsGrid}>
                 {[
-                  { icon: '📚', label: 'Books & textbooks' },
-                  { icon: '🗒️', label: 'Handwritten notes' },
-                  { icon: '📋', label: 'Documents & forms' },
-                  { icon: '🖊️', label: 'Whiteboards' },
-                  { icon: '🎓', label: 'Lecture slides' },
-                  { icon: '🧾', label: 'Receipts & menus' },
+                  { icon: 'books', label: 'Books & textbooks' },
+                  { icon: 'notes', label: 'Handwritten notes' },
+                  { icon: 'forms', label: 'Documents & forms' },
+                  { icon: 'board', label: 'Whiteboards' },
+                  { icon: 'slides', label: 'Lecture slides' },
+                  { icon: 'receipts', label: 'Receipts & menus' },
                 ].map((tip) => (
                   <View key={tip.label} style={styles.tipPill}>
-                    <ThemedText style={styles.tipIcon}>{tip.icon}</ThemedText>
+                    <View style={styles.tipIcon}><ScanLine size={15} color={DS.colors.primary} strokeWidth={2} /></View>
                     <ThemedText style={styles.tipLabel}>{tip.label}</ThemedText>
                   </View>
                 ))}
@@ -358,16 +359,16 @@ const styles = StyleSheet.create({
   },
 
   // Header
-  headerBlock: { marginBottom: 28 },
+  headerBlock: { marginBottom: 28, padding: 22, borderRadius: DS.radius.xl, backgroundColor: DS.colors.ink, ...DS.shadow.elevated },
   eyebrow: {
-    color: DS.colors.primary,
+    color: DS.colors.accent,
     fontSize: DS.font.caption,
     fontWeight: '800',
     letterSpacing: 2.5,
     marginBottom: 10,
   },
   heroTitle: {
-    color: DS.colors.ink,
+    color: DS.colors.white,
     fontSize: DS.font.display,
     fontWeight: '800',
     lineHeight: 36,
@@ -488,7 +489,7 @@ const styles = StyleSheet.create({
     marginBottom: 8,
   },
   scanningSubtitle: {
-    color: DS.colors.muted,
+    color: '#C2C3D6',
     fontSize: DS.font.sm,
     textAlign: 'center',
     lineHeight: 22,
@@ -524,6 +525,7 @@ const styles = StyleSheet.create({
     fontSize: DS.font.h2,
     fontWeight: '800',
   },
+  inlineRow: { flexDirection: 'row', alignItems: 'center', gap: 7 },
   scanAgainBtn: {
     backgroundColor: DS.colors.surfaceDim,
     borderRadius: DS.radius.sm,
@@ -595,7 +597,12 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: 10,
   },
-  errorEmoji: { fontSize: 44 },
+  errorEmoji: {
+    width: 56, height: 56, borderRadius: 28,
+    backgroundColor: DS.colors.dangerLight,
+    alignItems: 'center', justifyContent: 'center',
+    marginBottom: 10,
+  },
   errorTitle: {
     color: DS.colors.danger,
     fontSize: DS.font.h3,
@@ -640,7 +647,11 @@ const styles = StyleSheet.create({
     paddingVertical: 9,
     ...DS.shadow.card,
   },
-  tipIcon: { fontSize: 15 },
+  tipIcon: {
+    width: 28, height: 28, borderRadius: 14,
+    backgroundColor: DS.colors.primaryLight,
+    alignItems: 'center', justifyContent: 'center',
+  },
   tipLabel: { color: DS.colors.muted, fontSize: DS.font.sm, fontWeight: '600' },
 
   pressed: { opacity: 0.78, transform: [{ scale: 0.98 }] },

@@ -12,9 +12,9 @@ services:
       - key: GROQ_TRANSLATION_MODEL
         value: whisper-large-v3
       - key: MAX_REQUESTS_PER_MINUTE
-        value: "10"
+        value: "60"
       - key: MAX_REQUESTS_PER_USER_PER_MINUTE
-        value: "20"
+        value: "120"
       - key: ALLOWED_ORIGINS
         sync: false
       - key: SUPABASE_URL
@@ -22,7 +22,9 @@ services:
       - key: SUPABASE_ANON_KEY
         value: "sb_publishable_c7Dqa3N6mHOmrN64oPDkHw_saVtTEFK"
       - key: REQUIRE_AUTH
-        value: "false"
+        value: "true"
+      - key: MOBILE_GUEST_DAILY_LIMIT
+        value: "3"
 
       - key: GEMINI_API_KEY
         sync: false
