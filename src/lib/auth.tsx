@@ -1,4 +1,4 @@
-﻿import { Session, User } from '@supabase/supabase-js';
+import { Session, User } from '@supabase/supabase-js';
 import { PropsWithChildren, createContext, useContext, useEffect, useMemo, useState } from 'react';
 import { Platform } from 'react-native';
 import * as Linking from 'expo-linking';
@@ -129,8 +129,17 @@ export function AuthProvider({ children }: PropsWithChildren) {
 
           if (Platform.OS !== 'web' && data?.url) {
             const result = await WebBrowser.openAuthSessionAsync(data.url, redirectUrl);
-            if (result.type === 'cancel' || result.type === 'dismiss') {
-              return { error: 'Sign-in was cancelled.' };
+            if (result.type === 'success' && result.url) {
+              const parsed = Linking.parse(result.url);
+              const code = parsed.queryParams?.code;
+              if (typeof code === 'string') {
+                const { data: sessionData, error: exchangeError } =
+                  await client.auth.exchangeCodeForSession(code);
+                if (exchangeError) throw exchangeError;
+                if (sessionData?.session) {
+                  setSession(sessionData.session);
+                }
+              }
             }
           }
           return { error: null };
@@ -226,4 +235,3 @@ export function useAuth() {
   if (!value) throw new Error('useAuth must be used inside AuthProvider');
   return value;
 }
-
