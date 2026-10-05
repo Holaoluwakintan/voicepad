@@ -28,7 +28,7 @@ const upload = multer({
 const groqBaseUrl = process.env.GROQ_BASE_URL ?? 'https://api.groq.com/openai/v1';
 const rawAllowedOrigins = process.env.ALLOWED_ORIGINS?.trim();
 const allowedOrigins = rawAllowedOrigins
-  ? rawAllowedOrigins.split(',').map((value) => value.trim()).filter(Boolean)
+  ? rawAllowedOrigins.split(',').map((value) => value.trim().replace(/\/+$/, '')).filter(Boolean)
   : [];
 const isProduction = process.env.NODE_ENV === 'production';
 
@@ -130,7 +130,17 @@ app.use(cors({
   credentials: true,
 }));
 
+// Render sits behind Cloudflare, so Express's req.ip can be a shared proxy address.
+// Prefer the real client address the edge passes along; fall back to req.ip.
+function clientIpOf(req) {
+  const edge = req.headers['cf-connecting-ip'] || req.headers['true-client-ip'];
+  if (edge) return String(edge).trim();
+  const xff = String(req.headers['x-forwarded-for'] || '').split(',')[0].trim();
+  return xff || req.ip;
+}
+
 app.use((req, res, next) => {
+  req.clientIp = clientIpOf(req);
   const requestId = req.headers['x-request-id'] || crypto.randomUUID();
   req.requestId = String(requestId);
   res.setHeader('x-request-id', req.requestId);
@@ -215,7 +225,9 @@ function renderLegalHtml(title, sections) {
 app.get('/privacy', (_req, res) => res.type('html').send(renderLegalHtml('Privacy Policy', privacySections)));
 app.get('/terms', (_req, res) => res.type('html').send(renderLegalHtml('Terms of Service', termsSections)));
 
-const supabaseUrl = (process.env.SUPABASE_URL ?? '').trim();
+// Accept the project URL in any common shape (…/rest/v1/, trailing slashes) so the
+// token check always hits https://<project>.supabase.co/auth/v1/user.
+const supabaseUrl = (process.env.SUPABASE_URL ?? '').trim().replace(/\/+$/, '').replace(/\/(rest|auth)\/v1$/, '');
 const supabaseAnonKey = (process.env.SUPABASE_ANON_KEY ?? '').trim();
 // Production must never silently run as an unauthenticated AI proxy.
 const requireAuth = isProduction || process.env.REQUIRE_AUTH === 'true';
@@ -238,7 +250,7 @@ async function authMiddleware(req, res, next) {
 
   if (isWebGuest) {
     // Web guest: apply per-IP daily limit instead of auth
-    if (isWebGuestLimited(req.ip)) {
+    if (isWebGuestLimited(req.clientIp)) {
       return res.status(429).json({
         error: 'You have reached the 10-transcription daily web preview limit. Download the VoicePad Android APK for unlimited access.',
         upgradeUrl: process.env.APK_DOWNLOAD_URL || null,
@@ -254,7 +266,7 @@ async function authMiddleware(req, res, next) {
   const isMobileGuest = clientType === 'mobile' && !req.user;
   if (isMobileGuest) {
     const requestKey = `${req.path}:${String(req.headers['idempotency-key'] || req.body?.noteId || '').trim()}`;
-    if (isMobileGuestLimited(req.ip, requestKey)) {
+    if (isMobileGuestLimited(req.clientIp, requestKey)) {
       return res.status(429).json({
         error: 'Your free guest transcriptions are used up for today. Sign in to continue using VoicePad AI.',
         guestLimitReached: true,
@@ -310,7 +322,7 @@ function rateLimitMiddleware(req, res, next) {
       return res.status(429).json({ error: 'Your VoicePad AI usage limit has been reached. Please try again later.', requestId: req.requestId });
     }
   }
-  if (isRateLimited(req.ip)) {
+  if (isRateLimited(req.clientIp)) {
     return res.status(429).json({ error: 'Too many requests. Please wait a minute and try again.', requestId: req.requestId });
   }
   next();
@@ -321,7 +333,7 @@ function idempotencyMiddleware(req, res, next) {
   if (!key) {
     return next();
   }
-  const scopedKey = `${req.user?.id || req.ip}:${req.path}:${key}`;
+  const scopedKey = `${req.user?.id || req.clientIp}:${req.path}:${key}`;
   const previous = idempotencyResponses.get(scopedKey);
   if (previous) return res.status(previous.status).json(previous.body);
   const originalJson = res.json.bind(res);
@@ -375,6 +387,16 @@ const deepgramKeys = getApiKeyList(
   process.env.DEEPGRAM_API_KEYS
 );
 
+// Google retires Gemini model names regularly (2.0/2.5 now answer 404), so the list is
+// configurable and uses the rolling "-latest" aliases as a safety net.
+const geminiModels = getApiKeyList(
+  process.env.GEMINI_MODELS,
+  'gemini-3.5-flash-lite',
+  'gemini-flash-lite-latest',
+  'gemini-flash-latest'
+);
+const groqVisionModels = getApiKeyList(process.env.GROQ_VISION_MODELS, 'qwen/qwen3.8-27b');
+
 async function callDeepgramTranscription(audioBuffer, mimeType, language) {
   if (deepgramKeys.length === 0 || !audioBuffer || audioBuffer.length === 0) return null;
   const langParam = language && language !== 'auto'
@@ -386,7 +408,7 @@ async function callDeepgramTranscription(audioBuffer, mimeType, language) {
       const timeout = setTimeout(() => controller.abort(), 60_000);
       let response;
       try {
-        response = await fetch(`https://api.deepgram.com/v1/listen?model=nova-2&smart_format=true&punctuate=true${langParam}`, {
+        response = await fetch(`https://api.deepgram.com/v1/listen?model=${process.env.DEEPGRAM_MODEL || 'nova-3'}&smart_format=true&punctuate=true${langParam}`, {
           method: 'POST',
           headers: {
             Authorization: `Token ${apiKey}`,
@@ -407,7 +429,7 @@ async function callDeepgramTranscription(audioBuffer, mimeType, language) {
       const transcript = data?.results?.channels?.[0]?.alternatives?.[0]?.transcript;
       if (transcript !== undefined && typeof transcript === 'string' && transcript.trim()) {
         console.log('deepgram_transcription_succeeded');
-        return { text: transcript.trim(), model: 'deepgram/nova-2' };
+        return { text: transcript.trim(), model: `deepgram/${process.env.DEEPGRAM_MODEL || 'nova-3'}` };
       }
     } catch (err) {
       console.warn('deepgram_err', err instanceof Error ? err.message : err);
@@ -418,7 +440,6 @@ async function callDeepgramTranscription(audioBuffer, mimeType, language) {
 
 async function callGeminiTranscription(audioBuffer, mimeType, language) {
   if (geminiKeys.length === 0 || !audioBuffer || audioBuffer.length === 0) return null;
-  const geminiModels = ['gemini-2.0-flash-lite', 'gemini-2.5-flash', 'gemini-2.0-flash'];
   const base64Data = audioBuffer.toString('base64');
   const langInstruction = language && language !== 'auto'
     ? ` The spoken language is ${language}.`
@@ -481,7 +502,6 @@ async function callGeminiTranscription(audioBuffer, mimeType, language) {
 
 async function callGeminiSummary(text) {
   if (geminiKeys.length === 0) return null;
-  const geminiModels = ['gemini-2.0-flash-lite', 'gemini-2.5-flash', 'gemini-2.0-flash'];
   for (const apiKey of geminiKeys) {
     for (const model of geminiModels) {
       try {
@@ -491,6 +511,7 @@ async function callGeminiSummary(text) {
             'Content-Type': 'application/json',
             'x-goog-api-key': apiKey,
           },
+          signal: AbortSignal.timeout(45_000),
           body: JSON.stringify({
             contents: [{
               parts: [{
@@ -523,9 +544,63 @@ async function callGeminiSummary(text) {
   return null;
 }
 
+const OCR_PROMPT = 'Extract and transcribe all text from this image accurately (whiteboard, document, handwritten notes, lecture slides, or textbook). Format cleanly with headings and bullet points where helpful. Output ONLY the transcribed content without any extra intro or conversational commentary.';
+
+function ocrResult(text, model) {
+  const clean = text.trim();
+  const firstLine = clean.split('\n')[0].replace(/^[#*\s-]+/, '').trim().slice(0, 50);
+  return { text: clean, title: firstLine || 'Photo Note', model };
+}
+
+async function callGroqVision(base64Data, mimeType) {
+  if (groqKeys.length === 0) return null;
+  for (const apiKey of groqKeys) {
+    for (const model of groqVisionModels) {
+      try {
+        const controller = new AbortController();
+        const timeout = setTimeout(() => controller.abort(), 45_000);
+        let resp;
+        try {
+          resp = await fetch(`${groqBaseUrl}/chat/completions`, {
+            method: 'POST',
+            headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              model,
+              temperature: 0.1,
+              messages: [{
+                role: 'user',
+                content: [
+                  { type: 'text', text: OCR_PROMPT },
+                  { type: 'image_url', image_url: { url: `data:${mimeType || 'image/jpeg'};base64,${base64Data}` } },
+                ],
+              }],
+            }),
+            signal: controller.signal,
+          });
+        } finally {
+          clearTimeout(timeout);
+        }
+        const payload = await resp.json().catch(() => null);
+        if (!resp.ok) {
+          console.warn(`groq_vision_failed model=${model} status=${resp.status}`, payload?.error?.message);
+          continue;
+        }
+        const text = payload?.choices?.[0]?.message?.content;
+        if (typeof text === 'string' && text.trim()) {
+          console.log(`groq_vision_succeeded model=${model}`);
+          return ocrResult(text.replace(/<think>[\s\S]*?<\/think>/g, ''), `groq/${model}`);
+        }
+      } catch (err) {
+        console.warn(`groq_vision_err model=${model}`, err instanceof Error ? err.message : err);
+      }
+    }
+  }
+  return null;
+}
+
 async function callGeminiVision(base64Data, mimeType) {
   if (geminiKeys.length === 0) return null;
-  const geminiVisionModels = ['gemini-2.0-flash-lite', 'gemini-2.5-flash', 'gemini-2.0-flash'];
+  const geminiVisionModels = geminiModels;
   for (const apiKey of geminiKeys) {
     for (const model of geminiVisionModels) {
       try {
@@ -535,6 +610,7 @@ async function callGeminiVision(base64Data, mimeType) {
             'Content-Type': 'application/json',
             'x-goog-api-key': apiKey,
           },
+          signal: AbortSignal.timeout(45_000),
           body: JSON.stringify({
             contents: [{
               parts: [
@@ -830,9 +906,10 @@ app.post('/ocr', authMiddleware, rateLimitMiddleware, idempotencyMiddleware, upl
   }
 
   // 1. Primary: Google Gemini Vision (ultra-reliable on document/notes OCR)
-  const geminiVision = await callGeminiVision(base64Data, mimeType);
+  console.log(`ocr_request bytes=${Math.round(base64Data.length * 0.75)} geminiKeys=${geminiKeys.length} groqKeys=${groqKeys.length}`);
+  const visionResult = (await callGeminiVision(base64Data, mimeType)) || (await callGroqVision(base64Data, mimeType));
   try {
-    if (geminiVision) return res.json(geminiVision);
+    if (visionResult) return res.json(visionResult);
     return res.status(502).json({
       error: 'Could not transcribe image. All OCR providers exhausted. Please ensure the image is clear and retry.',
     });
