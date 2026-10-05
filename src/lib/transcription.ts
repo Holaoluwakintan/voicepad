@@ -23,11 +23,40 @@ export function wakeUpTranscriptionServer(): void {
 
 const REQUEST_TIMEOUT_MS = 120_000; // 2 minutes to comfortably absorb Render cold starts
 
+let lastAwakeAt = 0;
+/**
+ * Waits (up to ~70 s) for the transcription server to answer /health before the
+ * real upload starts. On a free Render instance that was asleep, this absorbs the
+ * cold start so the upload itself doesn't time out. Instant when the server is warm.
+ */
+export async function ensureServerAwake(maxWaitMs = 70_000): Promise<void> {
+  if (Date.now() - lastAwakeAt < 5 * 60_000) return;
+  const started = Date.now();
+  while (Date.now() - started < maxWaitMs) {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 25_000);
+    try {
+      const res = await fetch(`${TRANSCRIPTION_API_URL}/health`, { signal: controller.signal });
+      if (res.ok) {
+        lastAwakeAt = Date.now();
+        return;
+      }
+    } catch {
+      // still waking up / network blip — try again shortly
+    } finally {
+      clearTimeout(timer);
+    }
+    await new Promise((r) => setTimeout(r, 2_500));
+  }
+}
+
 async function performTranscriptionAttempt(
   audioUri: string,
-  options: { noteId: string; filename?: string; language?: string }
+  options: { noteId: string; filename?: string; language?: string; mimeType?: string }
 ): Promise<TranscriptionResult> {
+  const nativeMimeType = options.mimeType || 'audio/m4a';
   const nativeFilename = options.filename ?? `voicepad-${options.noteId}.m4a`;
+  await ensureServerAwake();
   const authHeaders = await getAuthHeaders();
   const idempotencyKey = `transcribe-${options.noteId}`;
 
@@ -41,7 +70,7 @@ async function performTranscriptionAttempt(
           httpMethod: 'POST',
           uploadType: FileSystemUploadType.MULTIPART,
           fieldName: 'file',
-          mimeType: 'audio/m4a',
+          mimeType: nativeMimeType,
           parameters: {
             noteId: options.noteId,
             mode: 'english',
@@ -73,11 +102,23 @@ async function performTranscriptionAttempt(
         return { text: payload.text.trim() };
       }
       if (status < 200 || status >= 300) {
-        throw new Error(payload?.error ?? `Server error (${status})`);
+        const serverErr = new Error(payload?.error ?? `Server error (${status})`);
+        // The server answered definitively (4xx). Re-sending the same file as a
+        // giant base64 string would only fail again and can exhaust memory on
+        // low-end phones, so surface the answer instead of falling back.
+        if (status >= 400 && status < 500) (serverErr as any).definitive = true;
+        throw serverErr;
       }
     } catch (nativeErr: any) {
       if (nativeErr?.message?.includes('timed out') || nativeErr?.name === 'AbortError') {
         throw new Error('Transcription timed out. The server may still be waking up. Please retry.');
+      }
+      if (
+        nativeErr?.message === 'AUTH_REQUIRED' ||
+        nativeErr?.message === 'GUEST_LIMIT_REACHED' ||
+        nativeErr?.definitive
+      ) {
+        throw nativeErr;
       }
       console.warn('Native multipart upload failed, falling back to base64 JSON payload:', nativeErr?.message);
     }
@@ -105,7 +146,7 @@ async function performTranscriptionAttempt(
           body: JSON.stringify({
             audio: base64Audio,
             filename: nativeFilename,
-            mimeType: 'audio/m4a',
+            mimeType: nativeMimeType,
             noteId: options.noteId,
             ...(options.language ? { language: options.language } : {}),
           }),
@@ -191,9 +232,6 @@ async function performTranscriptionAttempt(
       if (response.status === 429 && payload?.guestLimitReached) {
         throw new Error('GUEST_LIMIT_REACHED');
       }
-      if (response.status === 429 && payload?.guestLimitReached) {
-        throw new Error('GUEST_LIMIT_REACHED');
-      }
       if (response.ok && payload?.text && typeof payload.text === 'string') {
         return { text: payload.text.trim() };
       }
@@ -271,7 +309,7 @@ async function performTranscriptionAttempt(
 
 export async function transcribeAudio(
   audioUri: string,
-  options: { noteId: string; filename?: string; language?: string }
+  options: { noteId: string; filename?: string; language?: string; mimeType?: string }
 ): Promise<TranscriptionResult> {
   try {
     return await performTranscriptionAttempt(audioUri, options);

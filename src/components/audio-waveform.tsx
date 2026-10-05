@@ -1,72 +1,51 @@
 import { useMemo } from 'react';
 import { View, StyleSheet } from 'react-native';
 
-const ACCENT = '#6D5DFB';
-const NUM_BARS = 18;
-
-// Harmonic base multipliers to give a pleasant curved frequency-like profile
-const HARMONICS = [
-  0.35, 0.45, 0.65, 0.85, 1.0, 1.15, 1.3, 1.1, 0.95,
-  1.2, 1.35, 1.1, 0.9, 0.75, 0.6, 0.5, 0.4, 0.35,
-];
+const NUM_BARS = 29;
 
 interface AudioWaveformProps {
   isRecording: boolean;
   metering?: number;
   height?: number;
+  color?: string;
 }
 
-export function AudioWaveform({ isRecording, metering, height = 100 }: AudioWaveformProps) {
-  // Normalize metering dBFS (-60dB to 0dB) into 0.0 to 1.0
-  const normalizedPower = useMemo(() => {
-    if (!isRecording || metering === undefined || metering < -60) return 0.08;
-    return Math.max(0.12, Math.min(1.0, (metering + 60) / 60));
+/**
+ * Live level meter: symmetric bars that swell from the centre with the mic's
+ * loudness. Plain Views (no canvas) so it stays cheap on low-end phones.
+ */
+export function AudioWaveform({ isRecording, metering, height = 100, color = '#FFFFFF' }: AudioWaveformProps) {
+  const power = useMemo(() => {
+    if (!isRecording || metering === undefined || metering < -60) return isRecording ? 0.18 : 0;
+    return Math.max(0.14, Math.min(1, (metering + 55) / 50));
   }, [isRecording, metering]);
 
-  const barHeights = useMemo(() => {
-    const minHeight = 8;
-    const maxHeight = height * 0.82;
-
+  const bars = useMemo(() => {
+    const min = 4;
+    const max = height * 0.92;
+    const mid = (NUM_BARS - 1) / 2;
+    // A changing seed so neighbouring bars move independently as the level updates.
+    const seed = Math.round((metering ?? 0) * 7);
     return Array.from({ length: NUM_BARS }).map((_, i) => {
-      const harmonic = HARMONICS[i % HARMONICS.length];
-      if (!isRecording) {
-        return minHeight + harmonic * 4;
-      }
-      // Combine live mic power with frequency harmonic curve
-      const dynamic = minHeight + normalizedPower * maxHeight * harmonic * 0.75;
-      return Math.min(maxHeight, Math.max(minHeight, dynamic));
+      const distance = Math.abs(i - mid) / mid; // 0 at centre, 1 at edges
+      const envelope = Math.cos(distance * Math.PI * 0.5) ** 1.4;
+      if (!isRecording) return { h: min + envelope * 6, o: 0.22 + envelope * 0.18 };
+      const jitter = 0.55 + (((i * 73 + seed * 31) % 97) / 97) * 0.45;
+      const h = Math.min(max, Math.max(min, min + power * max * envelope * jitter));
+      return { h, o: 0.45 + envelope * 0.55 };
     });
-  }, [isRecording, normalizedPower, height]);
+  }, [isRecording, power, metering, height]);
 
   return (
     <View style={[styles.container, { height }]}>
-      {barHeights.map((h, index) => (
-        <View
-          key={index}
-          style={[
-            styles.bar,
-            {
-              height: h,
-              opacity: isRecording ? 0.75 + (h / height) * 0.25 : 0.35,
-              backgroundColor: isRecording ? ACCENT : '#625F75',
-            },
-          ]}
-        />
+      {bars.map((b, index) => (
+        <View key={index} style={[styles.bar, { height: b.h, opacity: b.o, backgroundColor: color }]} />
       ))}
     </View>
   );
 }
 
 const styles = StyleSheet.create({
-  container: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 6,
-    width: '100%',
-  },
-  bar: {
-    width: 6,
-    borderRadius: 4,
-  },
+  container: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 4, width: '100%' },
+  bar: { width: 4, borderRadius: 2 },
 });

@@ -24,7 +24,7 @@ import { FilePenLine, Search, Share2, X } from 'lucide-react-native';
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
 import { loadNotes, insertNote, updateNote, removeNote, Note } from '@/lib/notes';
-import { DS } from '@/constants/design';
+import { DS, displayType } from '@/constants/design';
 import { formatNoteDate, generateNoteId } from '@/lib/utils';
 
 type TabMode = 'write' | 'saved';
@@ -155,7 +155,7 @@ export default function NotesScreen() {
 
   return (
     <ThemedView style={styles.container}>
-      <SafeAreaView style={styles.safeArea}>
+      <SafeAreaView style={styles.safeArea} edges={['top', 'left', 'right']}>
         <KeyboardAvoidingView
           style={styles.flex}
           behavior={Platform.OS === 'ios' ? 'padding' : undefined}
@@ -165,14 +165,14 @@ export default function NotesScreen() {
           <View style={styles.headerArea}>
             <View style={styles.headerTopRow}>
               <View>
-                <ThemedText style={styles.eyebrow}>NOTEPAD</ThemedText>
+                <ThemedText style={styles.eyebrow}>Write · save · share</ThemedText>
                 <ThemedText style={styles.title}>
-                  {tabMode === 'write' && editingNoteId ? 'Editing note' : 'Notepad'}
+                  {tabMode === 'write' && editingNoteId ? 'Editing' : 'Notepad'}
                 </ThemedText>
               </View>
               {tabMode === 'write' && (
                 <Pressable onPress={handleNewNote} style={styles.newNoteBtn} accessibilityLabel="New note">
-                  <ThemedText style={styles.newNoteBtnText}>+ New</ThemedText>
+                  <FilePenLine size={15} color="#FFFFFF" strokeWidth={2.3} /><ThemedText style={styles.newNoteBtnText}>New</ThemedText>
                 </Pressable>
               )}
             </View>
@@ -225,7 +225,7 @@ export default function NotesScreen() {
                     {wordCount} {wordCount === 1 ? 'word' : 'words'} · {charCount} chars
                   </ThemedText>
                   {editingNoteId && (
-                    <ThemedText style={styles.editingBadge}>● Editing saved note</ThemedText>
+                    <ThemedText style={styles.editingBadge}>Editing saved note</ThemedText>
                   )}
                 </View>
               </View>
@@ -267,7 +267,7 @@ export default function NotesScreen() {
                   <View style={styles.recentHeader}>
                     <ThemedText style={styles.recentTitle}>Recent Saved Notes</ThemedText>
                     <Pressable onPress={() => setTabMode('saved')}>
-                      <ThemedText style={styles.viewAllText}>View All ➔</ThemedText>
+                      <ThemedText style={styles.viewAllText}>View all</ThemedText>
                     </Pressable>
                   </View>
                   {notepadNotes.slice(0, 3).map((item, i) => (
@@ -353,7 +353,7 @@ export default function NotesScreen() {
                         </Pressable>
                         <View style={styles.savedNoteActionsRow}>
                           <Pressable onPress={() => handleOpenNote(note)} style={styles.cardActionBtn} accessibilityLabel="Edit">
-                            <ThemedText style={styles.cardActionText}>✏️ Edit</ThemedText>
+                            <ThemedText style={styles.cardActionText}>Edit</ThemedText>
                           </Pressable>
                           <Pressable onPress={() => handleShareNote(note)} style={styles.cardActionBtn} accessibilityLabel="Share">
                             <ThemedText style={styles.cardActionText}>↗ Share</ThemedText>
@@ -364,7 +364,7 @@ export default function NotesScreen() {
                             accessibilityLabel="Delete"
                           >
                             <ThemedText style={[styles.cardActionText, { color: DS.colors.danger }]}>
-                              🗑 Delete
+                              Delete
                             </ThemedText>
                           </Pressable>
                         </View>
@@ -386,31 +386,18 @@ const styles = StyleSheet.create({
   safeArea: { flex: 1 },
   flex: { flex: 1 },
 
-  headerArea: { paddingHorizontal: 20, paddingTop: 16, paddingBottom: 10 },
+  headerArea: { paddingHorizontal: 20, paddingTop: 12, paddingBottom: 10, width: '100%', maxWidth: 760, alignSelf: 'center' },
   headerTopRow: {
     flexDirection: 'row', justifyContent: 'space-between',
     alignItems: 'center', marginBottom: 12,
   },
-  eyebrow: {
-    color: DS.colors.primary,
-    fontSize: DS.font.caption, fontWeight: '800', letterSpacing: 2.5,
-  },
-  title: { color: DS.colors.ink, fontSize: DS.font.display, fontWeight: '800', marginTop: 2 },
-  newNoteBtn: {
-    backgroundColor: DS.colors.primary,
-    paddingHorizontal: 16, paddingVertical: 9, borderRadius: DS.radius.sm,
-    ...DS.shadow.primary,
-  },
-  newNoteBtnText: { color: '#FFFFFF', fontSize: DS.font.xs, fontWeight: '800' },
+  eyebrow: { color: DS.colors.subtle, fontSize: 12, fontWeight: '700', letterSpacing: 1.4, textTransform: 'uppercase' },
+  title: { color: DS.colors.ink, ...displayType(44), marginTop: 2 },
+  newNoteBtn: { flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: DS.colors.ink, paddingHorizontal: 16, height: 40, borderRadius: 999 },
+  newNoteBtnText: { color: '#FFFFFF', fontSize: 14, fontWeight: '700' },
 
-  tabRow: {
-    flexDirection: 'row',
-    backgroundColor: DS.colors.surfaceDim,
-    borderRadius: DS.radius.md,
-    borderWidth: 1, borderColor: DS.colors.border,
-    padding: 4, gap: 4,
-  },
-  tabBtn: { flex: 1, paddingVertical: 9, borderRadius: DS.radius.sm, alignItems: 'center' },
+  tabRow: { flexDirection: 'row', backgroundColor: DS.colors.surfaceSoft, borderRadius: 14, padding: 4, gap: 4 },
+  tabBtn: { flex: 1, paddingVertical: 9, borderRadius: 11, alignItems: 'center' },
   tabBtnActive: { backgroundColor: DS.colors.surface, ...DS.shadow.card },
   tabBtnText: { color: DS.colors.muted, fontSize: DS.font.xs, fontWeight: '700' },
   tabBtnTextActive: { color: DS.colors.ink, fontWeight: '800' },
@@ -418,19 +405,9 @@ const styles = StyleSheet.create({
   scrollContent: { paddingHorizontal: 20, paddingBottom: 60, width: '100%', maxWidth: 760, alignSelf: 'center' },
 
   // Editor
-  editorCard: {
-    borderTopWidth: 3, borderTopColor: DS.colors.primary,
-    backgroundColor: DS.colors.surface,
-    borderRadius: DS.radius.lg, borderWidth: 1, borderColor: DS.colors.border,
-    padding: 18, marginTop: 8,
-    ...DS.shadow.card,
-  },
-  titleInput: {
-    fontSize: DS.font.h3, fontWeight: '800', color: DS.colors.ink,
-    borderBottomWidth: 1, borderBottomColor: DS.colors.border,
-    paddingVertical: 10, marginBottom: 10,
-  },
-  contentInput: { fontSize: DS.font.bodyMd, lineHeight: 25, color: DS.colors.ink, minHeight: 220 },
+  editorCard: { backgroundColor: DS.colors.surface, borderRadius: 24, borderWidth: 1, borderColor: DS.colors.border, padding: 18, marginTop: 8, ...DS.shadow.card },
+  titleInput: { ...displayType(28), color: DS.colors.ink, borderBottomWidth: 1, borderBottomColor: DS.colors.border, paddingVertical: 8, marginBottom: 10 },
+  contentInput: { fontSize: 16, lineHeight: 25, color: DS.colors.ink, minHeight: 240 },
   editorFooter: {
     flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center',
     borderTopWidth: 1, borderTopColor: DS.colors.surfaceDim, paddingTop: 10, marginTop: 10,
@@ -439,16 +416,9 @@ const styles = StyleSheet.create({
   editingBadge: { color: DS.colors.primary, fontSize: DS.font.xs, fontWeight: '800' },
 
   actionRow: { alignItems: 'center', flexDirection: 'row', gap: 8, marginTop: 12 },
-  primaryActionBtn: {
-    flex: 2, backgroundColor: DS.colors.primary, borderRadius: DS.radius.md,
-    paddingVertical: 14, alignItems: 'center', ...DS.shadow.primary,
-  },
-  primaryActionText: { color: '#FFFFFF', fontSize: DS.font.sm, fontWeight: '800' },
-  secondaryActionBtn: {
-    flex: 1, backgroundColor: DS.colors.surface, borderRadius: DS.radius.md,
-    paddingVertical: 14, alignItems: 'center',
-    borderWidth: 1, borderColor: DS.colors.border,
-  },
+  primaryActionBtn: { flex: 2, backgroundColor: DS.colors.ink, borderRadius: 16, height: 52, alignItems: 'center', justifyContent: 'center' },
+  primaryActionText: { color: '#FFFFFF', fontSize: 15, fontWeight: '800' },
+  secondaryActionBtn: { flex: 1, flexDirection: 'row', gap: 6, backgroundColor: DS.colors.surface, borderRadius: 16, height: 52, alignItems: 'center', justifyContent: 'center', borderWidth: 1, borderColor: DS.colors.border },
   secondaryActionText: { color: DS.colors.ink, fontSize: DS.font.xs, fontWeight: '700' },
   disabledBtn: { opacity: 0.4 },
 
@@ -458,13 +428,9 @@ const styles = StyleSheet.create({
     flexDirection: 'row', justifyContent: 'space-between',
     alignItems: 'center', marginBottom: 10,
   },
-  recentTitle: { color: DS.colors.ink, fontSize: DS.font.bodyMd, fontWeight: '800' },
+  recentTitle: { color: DS.colors.ink, fontSize: 12, fontWeight: '800', letterSpacing: 1.3, textTransform: 'uppercase' },
   viewAllText: { color: DS.colors.primary, fontSize: DS.font.xs, fontWeight: '700' },
-  miniCard: {
-    backgroundColor: DS.colors.surface, borderRadius: DS.radius.md,
-    borderWidth: 1, borderColor: DS.colors.border, padding: 14, marginBottom: 8,
-    ...DS.shadow.card,
-  },
+  miniCard: { backgroundColor: DS.colors.surface, borderRadius: 18, borderWidth: 1, borderColor: DS.colors.border, padding: 14, marginBottom: 8 },
   miniCardActive: { borderColor: DS.colors.primary, borderWidth: 1.5 },
   miniCardRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
   miniCardTitle: { color: DS.colors.ink, fontSize: DS.font.sm, fontWeight: '700', flex: 1, marginRight: 8 },
@@ -472,26 +438,16 @@ const styles = StyleSheet.create({
   miniCardSnippet: { color: DS.colors.muted, fontSize: DS.font.xs, marginTop: 4 },
 
   // Search
-  searchBox: {
-    flexDirection: 'row', alignItems: 'center',
-    backgroundColor: DS.colors.surface, borderRadius: DS.radius.md,
-    borderWidth: 1, borderColor: DS.colors.border,
-    paddingHorizontal: 14, height: 48, marginTop: 8, marginBottom: 14,
-    ...DS.shadow.card,
-  },
+  searchBox: { flexDirection: 'row', alignItems: 'center', gap: 8, backgroundColor: DS.colors.surface, borderRadius: 16, borderWidth: 1, borderColor: DS.colors.border, paddingHorizontal: 14, height: 50, marginTop: 8, marginBottom: 14 },
   searchIcon: { color: DS.colors.muted, fontSize: DS.font.body, marginRight: 8 },
   searchInput: { flex: 1, color: DS.colors.ink, fontSize: DS.font.bodyMd },
   clearSearch: { color: DS.colors.muted, fontSize: 22, paddingHorizontal: 6 },
 
   // Saved note cards
-  savedNoteCard: {
-    backgroundColor: DS.colors.surface, borderRadius: DS.radius.lg,
-    borderWidth: 1, borderColor: DS.colors.border,
-    padding: 16, marginBottom: 12, ...DS.shadow.card,
-  },
+  savedNoteCard: { backgroundColor: DS.colors.surface, borderRadius: 22, borderWidth: 1, borderColor: DS.colors.border, padding: 16, marginBottom: 10, ...DS.shadow.card },
   savedNoteClickArea: { paddingBottom: 8 },
   savedNoteTopRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
-  savedNoteTitle: { color: DS.colors.ink, fontSize: DS.font.bodyMd, fontWeight: '800', flex: 1, marginRight: 8 },
+  savedNoteTitle: { color: DS.colors.ink, fontSize: 17, fontWeight: '700', letterSpacing: -0.2, flex: 1, marginRight: 8 },
   savedNoteDate: { color: DS.colors.muted, fontSize: DS.font.caption },
   savedNotePreview: { color: DS.colors.muted, fontSize: DS.font.sm, lineHeight: 21, marginTop: 8 },
   savedNoteWords: { color: DS.colors.subtle, fontSize: DS.font.caption, marginTop: 8, fontWeight: '600' },
@@ -500,13 +456,8 @@ const styles = StyleSheet.create({
     borderTopWidth: 1, borderTopColor: DS.colors.surfaceDim,
     paddingTop: 10, marginTop: 6,
   },
-  cardActionBtn: {
-    paddingHorizontal: 12, paddingVertical: 6,
-    borderRadius: DS.radius.xs,
-    borderWidth: 1, borderColor: DS.colors.border,
-    backgroundColor: DS.colors.surfaceDim,
-  },
-  cardActionBtnDanger: { borderColor: '#FCA5A5' },
+  cardActionBtn: { paddingHorizontal: 12, paddingVertical: 7, borderRadius: 999, backgroundColor: DS.colors.surfaceSoft },
+  cardActionBtnDanger: { backgroundColor: DS.colors.dangerLight },
   cardActionText: { color: DS.colors.ink, fontSize: DS.font.xxs, fontWeight: '700' },
 
   // Empty state

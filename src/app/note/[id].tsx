@@ -35,7 +35,8 @@ import {
   NoteCategory,
 } from '@/lib/notes';
 import { deleteAudioFromCloud, getSignedAudioUrl } from '@/lib/storage';
-import { DS } from '@/constants/design';
+import { DS, displayType } from '@/constants/design';
+import { ChevronLeft, ClipboardCopy, FileText, Share2, Sparkles } from 'lucide-react-native';
 import { formatNoteDate, toFriendlyErrorMessage } from '@/lib/utils';
 
 export default function NoteDetailScreen() {
@@ -286,7 +287,7 @@ export default function NoteDetailScreen() {
               accessibilityLabel="Go back"
               style={styles.backButton}
             >
-              <ThemedText style={styles.backText}>‹</ThemedText>
+              <ChevronLeft size={22} color={DS.colors.ink} strokeWidth={2.4} />
             </Pressable>
             <ThemedText style={styles.headerTitle}>Note detail</ThemedText>
             <Pressable
@@ -301,7 +302,7 @@ export default function NoteDetailScreen() {
           {/* Eyebrow & Title */}
           <View style={styles.metaRow}>
             <ThemedText style={styles.eyebrow}>
-              {note.source === 'voice' ? '🎙️ VOICE NOTE' : '📝 TEXT NOTE'}
+              {note.source === 'voice' ? 'Voice note' : 'Text note'}
             </ThemedText>
             <Pressable
               onPress={togglePin}
@@ -309,7 +310,7 @@ export default function NoteDetailScreen() {
               accessibilityLabel={note.pinned ? 'Unpin note' : 'Pin note'}
             >
               <ThemedText style={[styles.pinText, note.pinned && styles.pinTextActive]}>
-                {note.pinned ? '★ Pinned' : '☆ Pin'}
+                {note.pinned ? 'Pinned' : 'Pin'}
               </ThemedText>
             </Pressable>
           </View>
@@ -318,6 +319,9 @@ export default function NoteDetailScreen() {
             value={title}
             onChangeText={setTitle}
             style={styles.titleInput}
+            multiline
+            scrollEnabled={false}
+            blurOnSubmit
             accessibilityLabel="Note title"
             placeholder="Note title"
             placeholderTextColor={DS.colors.subtle}
@@ -352,8 +356,7 @@ export default function NoteDetailScreen() {
                       isSelected && styles.categoryTextSelected,
                     ]}
                   >
-                    {itemData ? `${itemData.icon} ` : ''}
-                    {item}
+                                        {item}
                   </ThemedText>
                 </Pressable>
               );
@@ -367,7 +370,7 @@ export default function NoteDetailScreen() {
           {(isPending || isFailed) && (
             <View style={[styles.statusCard, isFailed && styles.failedCard]}>
               <ThemedText style={styles.statusTitle}>
-                {isPending ? '⏳ Transcription in progress' : '⚠️ Transcription needs attention'}
+                {isPending ? 'Transcription in progress' : 'Transcription needs attention'}
               </ThemedText>
               <ThemedText style={styles.statusText}>
                 {isPending
@@ -381,7 +384,7 @@ export default function NoteDetailScreen() {
                   style={styles.retryButton}
                 >
                   <ThemedText style={styles.retryText}>
-                    {isRetrying ? 'Retrying…' : '🔄 Retry transcription'}
+                    {isRetrying ? 'Retrying…' : 'Retry transcription'}
                   </ThemedText>
                 </Pressable>
               )}
@@ -400,7 +403,7 @@ export default function NoteDetailScreen() {
               <ThemedText
                 style={[styles.segmentText, activeTab === 'transcript' && styles.segmentTextActive]}
               >
-                📝 Transcript
+                Transcript
               </ThemedText>
             </Pressable>
 
@@ -414,7 +417,7 @@ export default function NoteDetailScreen() {
               <ThemedText
                 style={[styles.segmentText, activeTab === 'summary' && styles.segmentTextActive]}
               >
-                ✨ AI Summary
+                AI Summary
               </ThemedText>
             </Pressable>
           </View>
@@ -439,7 +442,7 @@ export default function NoteDetailScreen() {
               {note.summary ? (
                 <View style={styles.summaryCard}>
                   <View style={styles.summaryHeader}>
-                    <ThemedText style={styles.summaryBadge}>✨ AI Summary & Action Items</ThemedText>
+                    <ThemedText style={styles.summaryBadge}>AI summary & action items</ThemedText>
                   </View>
                   <ThemedText style={styles.summaryContent}>{note.summary}</ThemedText>
                   <Pressable
@@ -448,13 +451,13 @@ export default function NoteDetailScreen() {
                     style={styles.regenerateButton}
                   >
                     <ThemedText style={styles.regenerateText}>
-                      {isSummarizing ? '✨ Regenerating…' : '🔄 Regenerate Summary'}
+                      {isSummarizing ? 'Regenerating…' : 'Regenerate summary'}
                     </ThemedText>
                   </Pressable>
                 </View>
               ) : (
                 <View style={styles.emptySummaryCard}>
-                  <ThemedText style={styles.sparkleIcon}>✨</ThemedText>
+                  <View style={styles.sparkleIcon}><Sparkles size={24} color={DS.colors.primary} strokeWidth={2} /></View>
                   <ThemedText style={styles.emptySummaryTitle}>
                     Generate AI Summary & Action Items
                   </ThemedText>
@@ -467,7 +470,7 @@ export default function NoteDetailScreen() {
                     style={styles.generateButton}
                   >
                     <ThemedText style={styles.generateButtonText}>
-                      {isSummarizing ? '✨ Analyzing transcript…' : '✨ Generate AI Summary'}
+                      {isSummarizing ? 'Analyzing transcript…' : 'Generate AI summary'}
                     </ThemedText>
                   </Pressable>
                 </View>
@@ -486,7 +489,7 @@ export default function NoteDetailScreen() {
               accessibilityRole="button"
               accessibilityLabel="Export or share note"
             >
-              <ThemedText style={styles.shareText}>↗ Export & Share</ThemedText>
+              <ThemedText style={styles.shareText}>Export & share</ThemedText>
             </Pressable>
             <Pressable
               onPress={saveChanges}
@@ -496,7 +499,7 @@ export default function NoteDetailScreen() {
               accessibilityLabel="Save note changes"
             >
               <ThemedText style={styles.saveText}>
-                {isSaving ? 'Saving…' : '💾 Save changes'}
+                {isSaving ? 'Saving…' : 'Save changes'}
               </ThemedText>
             </Pressable>
           </View>
@@ -541,11 +544,11 @@ export default function NoteDetailScreen() {
                 accessibilityRole="button"
               >
                 <View style={styles.exportIconBox}>
-                  <ThemedText style={styles.exportIcon}>📋</ThemedText>
+                  <ClipboardCopy size={19} color={DS.colors.primary} strokeWidth={2.1} />
                 </View>
                 <View style={styles.exportOptionInfo}>
                   <ThemedText style={styles.exportOptionTitle}>
-                    {copiedFormat === 'markdown' ? '✓ Copied Markdown to Clipboard!' : 'Copy formatted Markdown'}
+                    {copiedFormat === 'markdown' ? 'Copied ✓' : 'Copy formatted Markdown'}
                   </ThemedText>
                   <ThemedText style={styles.exportOptionDesc}>
                     Obsidian, Notion, Bear, GitHub & notes apps
@@ -560,7 +563,7 @@ export default function NoteDetailScreen() {
                 accessibilityRole="button"
               >
                 <View style={[styles.exportIconBox, { backgroundColor: DS.colors.accentLight }]}>
-                  <ThemedText style={styles.exportIcon}>↗</ThemedText>
+                  <Share2 size={19} color={DS.colors.primary} strokeWidth={2.1} />
                 </View>
                 <View style={styles.exportOptionInfo}>
                   <ThemedText style={styles.exportOptionTitle}>Share via apps</ThemedText>
@@ -577,11 +580,11 @@ export default function NoteDetailScreen() {
                 accessibilityRole="button"
               >
                 <View style={[styles.exportIconBox, { backgroundColor: '#F1F5F9' }]}>
-                  <ThemedText style={styles.exportIcon}>📝</ThemedText>
+                  <FileText size={19} color={DS.colors.primary} strokeWidth={2.1} />
                 </View>
                 <View style={styles.exportOptionInfo}>
                   <ThemedText style={styles.exportOptionTitle}>
-                    {copiedFormat === 'transcript' ? '✓ Copied Plain Text!' : 'Copy plain transcript'}
+                    {copiedFormat === 'transcript' ? 'Copied ✓' : 'Copy plain transcript'}
                   </ThemedText>
                   <ThemedText style={styles.exportOptionDesc}>
                     Raw text without markdown headings
@@ -597,11 +600,11 @@ export default function NoteDetailScreen() {
                   accessibilityRole="button"
                 >
                   <View style={[styles.exportIconBox, { backgroundColor: DS.colors.primaryLight }]}>
-                    <ThemedText style={styles.exportIcon}>✨</ThemedText>
+                    <Sparkles size={19} color={DS.colors.primary} strokeWidth={2.1} />
                   </View>
                   <View style={styles.exportOptionInfo}>
                     <ThemedText style={styles.exportOptionTitle}>
-                      {copiedFormat === 'summary' ? '✓ Copied AI Summary!' : 'Copy AI summary only'}
+                      {copiedFormat === 'summary' ? 'Copied ✓' : 'Copy AI summary only'}
                     </ThemedText>
                     <ThemedText style={styles.exportOptionDesc}>
                       Executive summary, key points & action items
@@ -620,56 +623,24 @@ export default function NoteDetailScreen() {
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: DS.colors.canvas },
   safeArea: { flex: 1 },
-  content: {
-    paddingHorizontal: 22,
-    paddingTop: 14,
-    paddingBottom: 50,
-    width: '100%',
-    maxWidth: 760,
-    alignSelf: 'center',
-  },
+  content: { paddingHorizontal: 20, paddingTop: 8, paddingBottom: 48, width: '100%', maxWidth: 760, alignSelf: 'center' },
   center: { flex: 1, alignItems: 'center', justifyContent: 'center', backgroundColor: DS.colors.canvas },
   muted: { color: DS.colors.muted },
-  header: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    marginBottom: 20,
-  },
-  backButton: { width: 44, height: 44, justifyContent: 'center' },
+  header: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 14 },
+  backButton: { width: 42, height: 42, borderRadius: 21, backgroundColor: DS.colors.surface, borderWidth: 1, borderColor: DS.colors.border, alignItems: 'center', justifyContent: 'center' },
   backText: { color: DS.colors.ink, fontSize: 38, fontWeight: '300', lineHeight: 40 },
-  headerTitle: {
-    color: DS.colors.ink,
-    fontSize: DS.font.bodyMd,
-    fontWeight: '800',
-    textTransform: 'uppercase',
-    letterSpacing: 1.2,
-  },
-  deleteHeaderButton: { paddingHorizontal: 12, paddingVertical: 8 },
-  deleteHeaderText: { color: DS.colors.danger, fontSize: DS.font.sm, fontWeight: '700' },
+  headerTitle: { color: DS.colors.subtle, fontSize: 12, fontWeight: '700', letterSpacing: 1.4, textTransform: 'uppercase' },
+  deleteHeaderButton: { height: 36, paddingHorizontal: 14, borderRadius: 999, backgroundColor: DS.colors.dangerLight, justifyContent: 'center' },
+  deleteHeaderText: { color: DS.colors.danger, fontSize: 13, fontWeight: '700' },
   metaRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
     marginBottom: 6,
   },
-  eyebrow: {
-    color: DS.colors.primary,
-    fontSize: DS.font.caption,
-    fontWeight: '800',
-    letterSpacing: 2,
-  },
-  titleInput: {
-    color: DS.colors.ink,
-    fontSize: DS.font.display,
-    lineHeight: 36,
-    fontWeight: '800',
-    paddingVertical: 10,
-    borderBottomWidth: 1,
-    borderBottomColor: DS.colors.border,
-    marginTop: 4,
-  },
-  date: { color: DS.colors.muted, fontSize: DS.font.xs, marginTop: 8 },
+  eyebrow: { color: DS.colors.primary, fontSize: 12, fontWeight: '800', letterSpacing: 1.3, textTransform: 'uppercase' },
+  titleInput: { color: DS.colors.ink, ...displayType(34), paddingVertical: 4, marginTop: 4, textAlignVertical: 'top' },
+  date: { color: DS.colors.muted, fontSize: 13, marginTop: 2, marginBottom: 16 },
   categoryLabel: {
     color: DS.colors.ink,
     fontSize: DS.font.sm,
@@ -677,27 +648,13 @@ const styles = StyleSheet.create({
     marginTop: 20,
   },
   categoryRow: { gap: 8, paddingVertical: 10 },
-  categoryChip: {
-    borderWidth: 1,
-    borderColor: DS.colors.border,
-    borderRadius: DS.radius.full,
-    paddingHorizontal: 14,
-    paddingVertical: 8,
-    backgroundColor: DS.colors.surface,
-  },
+  categoryChip: { paddingHorizontal: 14, height: 36, borderRadius: 18, justifyContent: 'center', backgroundColor: DS.colors.surface, borderWidth: 1, borderColor: DS.colors.border },
   categoryText: { color: DS.colors.muted, fontSize: DS.font.xs, fontWeight: '600' },
   categoryTextSelected: { color: '#FFFFFF', fontWeight: '800' },
-  pinButton: {
-    borderWidth: 1,
-    borderColor: DS.colors.border,
-    borderRadius: DS.radius.full,
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-    backgroundColor: DS.colors.surface,
-  },
-  pinButtonActive: { backgroundColor: '#FFF4CE', borderColor: '#F0C75E' },
-  pinText: { color: DS.colors.muted, fontSize: DS.font.xs, fontWeight: '800' },
-  pinTextActive: { color: '#A86A00' },
+  pinButton: { height: 32, paddingHorizontal: 12, borderRadius: 999, backgroundColor: DS.colors.surface, borderWidth: 1, borderColor: DS.colors.border, justifyContent: 'center' },
+  pinButtonActive: { backgroundColor: DS.colors.ink, borderColor: DS.colors.ink },
+  pinText: { color: DS.colors.inkSoft, fontSize: 12.5, fontWeight: '700' },
+  pinTextActive: { color: DS.colors.white },
   statusCard: {
     backgroundColor: DS.colors.surface,
     borderRadius: DS.radius.lg,
@@ -724,20 +681,9 @@ const styles = StyleSheet.create({
     paddingVertical: 8,
   },
   retryText: { color: DS.colors.danger, fontWeight: '800', fontSize: DS.font.xs },
-  segmentContainer: {
-    flexDirection: 'row',
-    backgroundColor: DS.colors.surfaceDim,
-    borderRadius: DS.radius.md,
-    borderWidth: 1,
-    borderColor: DS.colors.border,
-    padding: 4,
-    marginTop: 22,
-  },
-  segmentTab: { flex: 1, paddingVertical: 10, alignItems: 'center', borderRadius: DS.radius.sm },
-  segmentTabActive: {
-    backgroundColor: DS.colors.surface,
-    ...DS.shadow.card,
-  },
+  segmentContainer: { flexDirection: 'row', backgroundColor: DS.colors.surfaceSoft, borderRadius: 14, padding: 4, gap: 4, marginVertical: 14 },
+  segmentTab: { flex: 1, paddingVertical: 10, borderRadius: 11, alignItems: 'center' },
+  segmentTabActive: { backgroundColor: DS.colors.surface, ...DS.shadow.card },
   segmentText: { color: DS.colors.muted, fontSize: DS.font.sm, fontWeight: '700' },
   segmentTextActive: { color: DS.colors.ink, fontWeight: '800' },
   contentInput: {
@@ -783,7 +729,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     ...DS.shadow.card,
   },
-  sparkleIcon: { fontSize: 36, marginBottom: 10 },
+  sparkleIcon: { width: 52, height: 52, borderRadius: 26, backgroundColor: DS.colors.primaryLight, alignItems: 'center', justifyContent: 'center', marginBottom: 10 },
   emptySummaryTitle: {
     color: DS.colors.ink,
     fontSize: DS.font.h3,
@@ -798,35 +744,13 @@ const styles = StyleSheet.create({
     marginTop: 6,
     maxWidth: 400,
   },
-  generateButton: {
-    backgroundColor: DS.colors.primary,
-    borderRadius: DS.radius.md,
-    paddingHorizontal: 22,
-    paddingVertical: 14,
-    marginTop: 20,
-    ...DS.shadow.primary,
-  },
-  generateButtonText: { color: '#FFFFFF', fontSize: DS.font.bodyMd, fontWeight: '800' },
+  generateButton: { height: 52, borderRadius: 16, backgroundColor: DS.colors.primary, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 22, marginTop: 14, ...DS.shadow.primary },
+  generateButtonText: { color: DS.colors.white, fontSize: 15, fontWeight: '800' },
   actionRow: { flexDirection: 'row', gap: 10, marginTop: 22 },
-  shareButton: {
-    flex: 1,
-    backgroundColor: DS.colors.surface,
-    borderRadius: DS.radius.md,
-    paddingVertical: 15,
-    alignItems: 'center',
-    borderWidth: 1,
-    borderColor: DS.colors.border,
-  },
-  shareText: { color: DS.colors.ink, fontSize: DS.font.bodyMd, fontWeight: '700' },
-  saveButton: {
-    flex: 2,
-    backgroundColor: DS.colors.primary,
-    borderRadius: DS.radius.md,
-    paddingVertical: 15,
-    alignItems: 'center',
-    ...DS.shadow.primary,
-  },
-  saveText: { color: '#FFFFFF', fontSize: DS.font.bodyMd, fontWeight: '800' },
+  shareButton: { flex: 1, height: 54, borderRadius: 18, backgroundColor: DS.colors.surface, borderWidth: 1, borderColor: DS.colors.border, alignItems: 'center', justifyContent: 'center' },
+  shareText: { color: DS.colors.ink, fontSize: 15, fontWeight: '700' },
+  saveButton: { flex: 1, height: 54, borderRadius: 18, backgroundColor: DS.colors.ink, alignItems: 'center', justifyContent: 'center' },
+  saveText: { color: DS.colors.white, fontSize: 15, fontWeight: '800' },
   pressed: { opacity: 0.84, transform: [{ scale: 0.99 }] },
   exportModalBackdrop: {
     flex: 1,
@@ -894,15 +818,7 @@ const styles = StyleSheet.create({
     backgroundColor: DS.colors.primaryLight,
     borderColor: DS.colors.primary,
   },
-  exportIconBox: {
-    width: 44,
-    height: 44,
-    borderRadius: DS.radius.sm,
-    backgroundColor: DS.colors.primaryLight,
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginRight: 14,
-  },
+  exportIconBox: { width: 44, height: 44, borderRadius: 14, backgroundColor: DS.colors.primaryLight, alignItems: 'center', justifyContent: 'center' },
   exportIcon: {
     fontSize: 20,
   },

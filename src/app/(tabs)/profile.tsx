@@ -27,9 +27,10 @@ import { LegalModal } from '@/components/legal-modal';
 import { useAuth } from '@/lib/auth';
 import { loadNotes, Note } from '@/lib/notes';
 import { syncNotes } from '@/lib/sync';
-import { DS } from '@/constants/design';
+import { DS, displayType } from '@/constants/design';
+import { AuroraBackdrop } from '@/components/premium-ui';
 import Constants from 'expo-constants';
-import { Cloud, Edit3, LogOut, ShieldCheck } from 'lucide-react-native';
+import { CheckCircle2, ChevronRight, Cloud, Edit3, Loader, LogOut, NotebookText, ShieldCheck } from 'lucide-react-native';
 
 export default function ProfileScreen() {
   const router = useRouter();
@@ -133,7 +134,7 @@ export default function ProfileScreen() {
     try { await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium); } catch {}
     const result = await signInWithOAuth(provider);
     setAuthAction(null);
-    if (result.error) {
+    if (result.error && !/cancel/i.test(result.error)) {
       Alert.alert(
         `${provider === 'google' ? 'Google' : 'Apple'} Sign-In`,
         `${result.error}\n\nPlease use email and password below.`
@@ -211,7 +212,7 @@ export default function ProfileScreen() {
 
   return (
     <ThemedView style={styles.container}>
-      <SafeAreaView style={styles.safeArea}>
+      <SafeAreaView style={styles.safeArea} edges={['top', 'left', 'right']}>
         {/* ← ScrollView wraps everything (bug fix for small screens) */}
         <ScrollView
           contentContainerStyle={styles.scrollContent}
@@ -220,6 +221,7 @@ export default function ProfileScreen() {
         >
           {/* ─── Avatar + name ─── */}
           <View style={styles.avatarSection}>
+            <AuroraBackdrop intensity={0.9} />
             <View style={styles.avatarRing}>
               <View style={styles.avatar}>
                 <ThemedText style={styles.avatarText}>{avatarLetter}</ThemedText>
@@ -235,16 +237,16 @@ export default function ProfileScreen() {
                 style={styles.editNameBtn}
                 accessibilityLabel="Edit display name"
               >
-                <Edit3 size={15} color={DS.colors.primary} strokeWidth={2.1} /><ThemedText style={styles.editNameBtnText}>Edit display name</ThemedText>
+                <Edit3 size={14} color={DS.colors.white} strokeWidth={2.2} /><ThemedText style={styles.editNameBtnText}>Edit display name</ThemedText>
               </Pressable>
             )}
           </View>
 
           {/* ─── Stats ─── */}
           <View style={styles.statsRow}>
-            <StatCard value={String(notes.length)} label="Total notes" icon="📋" />
-            <StatCard value={String(ready)} label="Transcribed" icon="✅" />
-            <StatCard value={String(pending)} label="In progress" icon="⏳" />
+            <StatCard value={String(notes.length)} label="Notes" icon={<NotebookText size={17} color={DS.colors.primary} strokeWidth={2.2} />} />
+            <StatCard value={String(ready)} label="Transcribed" icon={<CheckCircle2 size={17} color={DS.colors.success} strokeWidth={2.2} />} />
+            <StatCard value={String(pending)} label="In progress" icon={<Loader size={17} color={DS.colors.warning} strokeWidth={2.2} />} />
           </View>
 
           {/* ─── Pro Membership Card ─── */}
@@ -263,7 +265,7 @@ export default function ProfileScreen() {
                 Premium features and subscriptions are coming soon.
               </ThemedText>
             </View>
-            <ThemedText style={styles.proBannerArrow}>›</ThemedText>
+            <ChevronRight size={20} color={DS.colors.subtle} strokeWidth={2.2} />
           </Pressable>
 
           {/* ─── Cloud not configured notice ─── */}
@@ -298,15 +300,11 @@ export default function ProfileScreen() {
                       <Text style={styles.googleGLogo}>G</Text>
                     </View>
                     <Text style={styles.googleBrandText}>
-                      <Text style={{ color: '#4285F4' }}>G</Text>
-                      <Text style={{ color: '#EA4335' }}>o</Text>
-                      <Text style={{ color: '#FBBC05' }}>o</Text>
-                      <Text style={{ color: '#4285F4' }}>g</Text>
-                      <Text style={{ color: '#34A853' }}>l</Text>
-                      <Text style={{ color: '#EA4335' }}>e</Text>
+                      {authAction === 'google' ? 'Opening Google…' : 'Continue with Google'}
                     </Text>
                   </View>
                 </Pressable>
+                {Platform.OS === 'ios' && (
                 <Pressable
                   disabled={Boolean(authAction)}
                   onPress={() => handleOAuth('apple')}
@@ -315,6 +313,7 @@ export default function ProfileScreen() {
                 >
                   <ThemedText style={styles.appleText}> Apple</ThemedText>
                 </Pressable>
+                )}
               </View>
 
               <View style={styles.dividerRow}>
@@ -363,7 +362,7 @@ export default function ProfileScreen() {
                     <Text style={styles.primaryText}> Signing in…</Text>
                   </View>
                 ) : (
-                  <Text style={styles.primaryText}>✉️  Sign In with Email</Text>
+                  <Text style={styles.primaryText}>Sign in with email</Text>
                 )}
               </Pressable>
 
@@ -379,13 +378,13 @@ export default function ProfileScreen() {
                     <Text style={styles.secondaryText}> Creating account…</Text>
                   </View>
                 ) : (
-                  <Text style={styles.secondaryText}>✨  Create Account</Text>
+                  <Text style={styles.secondaryText}>Create account</Text>
                 )}
               </Pressable>
 
               {unconfirmedEmail && (
                 <View style={styles.unconfirmedCard}>
-                  <ThemedText style={styles.unconfirmedTitle}>📩 Verification Email Sent</ThemedText>
+                  <ThemedText style={styles.unconfirmedTitle}>Check your inbox</ThemedText>
                   <ThemedText style={styles.unconfirmedBody}>
                     A link was sent to <ThemedText style={{ fontWeight: '800' }}>{unconfirmedEmail}</ThemedText>.{' '}
                     Check Inbox and Spam.
@@ -397,7 +396,7 @@ export default function ProfileScreen() {
                     accessibilityLabel="Resend confirmation email"
                   >
                     <Text style={styles.resendButtonText}>
-                      {authAction === 'resend' ? 'Sending…' : '🔄 Resend link'}
+                      {authAction === 'resend' ? 'Sending…' : 'Resend link'}
                     </Text>
                   </Pressable>
                 </View>
@@ -549,10 +548,10 @@ export default function ProfileScreen() {
   );
 }
 
-function StatCard({ value, label, icon }: { value: string; label: string; icon: string }) {
+function StatCard({ value, label, icon }: { value: string; label: string; icon: React.ReactNode }) {
   return (
     <View style={styles.statCard}>
-      <ThemedText style={styles.statIcon}>{icon}</ThemedText>
+      <View style={styles.statIcon}>{icon}</View>
       <ThemedText style={styles.statValue}>{value}</ThemedText>
       <ThemedText style={styles.statLabel}>{label}</ThemedText>
     </View>
@@ -562,82 +561,32 @@ function StatCard({ value, label, icon }: { value: string; label: string; icon: 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: DS.colors.canvas },
   safeArea: { flex: 1 },
-  scrollContent: {
-    paddingHorizontal: 22,
-    paddingTop: 20,
-    width: '100%',
-    maxWidth: 560,
-    alignSelf: 'center',
-  },
+  scrollContent: { paddingHorizontal: 20, paddingTop: 12, paddingBottom: 32, width: '100%', maxWidth: 560, alignSelf: 'center' },
 
   // Avatar section
-  avatarSection: { alignItems: 'center', marginBottom: 24 },
-  avatarRing: {
-    width: 96, height: 96, borderRadius: 48,
-    borderWidth: 3, borderColor: DS.colors.primary,
-    alignItems: 'center', justifyContent: 'center',
-    backgroundColor: DS.colors.primaryLight,
-    marginBottom: 14,
-    shadowColor: DS.colors.primary,
-    shadowOpacity: 0.28,
-    shadowRadius: 14,
-    shadowOffset: { width: 0, height: 4 },
-    elevation: 6,
-  },
-  avatar: {
-    width: 82, height: 82, borderRadius: 41,
-    backgroundColor: DS.colors.primaryLight,
-    alignItems: 'center', justifyContent: 'center',
-  },
-  avatarText: { color: DS.colors.primary, fontSize: DS.font.display, fontWeight: '800' },
-  displayName: { color: DS.colors.ink, fontSize: DS.font.h2, fontWeight: '800' },
-  emailLabel: { color: DS.colors.muted, fontSize: DS.font.sm, marginTop: 4 },
-  editNameBtn: { marginTop: 10, paddingHorizontal: 14, paddingVertical: 6 },
-  editNameBtnText: { color: DS.colors.primary, fontSize: DS.font.xs, fontWeight: '700' },
+  avatarSection: { alignItems: 'center', marginBottom: 14, borderRadius: 30, paddingVertical: 28, paddingHorizontal: 20, overflow: 'hidden', backgroundColor: DS.colors.night, ...DS.shadow.floating },
+  avatarRing: { width: 92, height: 92, borderRadius: 46, borderWidth: 2, borderColor: 'rgba(255,255,255,0.35)', alignItems: 'center', justifyContent: 'center', marginBottom: 14 },
+  avatar: { width: 78, height: 78, borderRadius: 39, backgroundColor: DS.colors.white, alignItems: 'center', justifyContent: 'center' },
+  avatarText: { color: DS.colors.ink, ...displayType(40) },
+  displayName: { color: DS.colors.nightText, ...displayType(32), textAlign: 'center' },
+  emailLabel: { color: DS.colors.nightMuted, fontSize: 14, marginTop: 4, textAlign: 'center' },
+  editNameBtn: { marginTop: 14, flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: 'rgba(255,255,255,0.10)', borderWidth: 1, borderColor: 'rgba(255,255,255,0.12)', borderRadius: 999, paddingHorizontal: 14, paddingVertical: 8 },
+  editNameBtnText: { color: DS.colors.white, fontSize: 13, fontWeight: '700' },
 
   // Stats
-  statsRow: { flexDirection: 'row', gap: 10, marginBottom: 22 },
-  statCard: {
-    flex: 1,
-    backgroundColor: DS.colors.surface,
-    borderRadius: DS.radius.lg,
-    paddingVertical: 16,
-    alignItems: 'center',
-    borderWidth: 1,
-    borderColor: DS.colors.border,
-    ...DS.shadow.card,
-    gap: 4,
-  },
-  statIcon: { fontSize: 20 },
-  statValue: { color: DS.colors.primary, fontSize: DS.font.h2, fontWeight: '800' },
-  statLabel: { color: DS.colors.muted, fontSize: DS.font.caption, textAlign: 'center' },
+  statsRow: { flexDirection: 'row', gap: 10, marginBottom: 14 },
+  statCard: { flex: 1, backgroundColor: DS.colors.surface, borderRadius: 20, borderWidth: 1, borderColor: DS.colors.border, paddingVertical: 14, paddingHorizontal: 12, alignItems: 'flex-start' },
+  statIcon: { width: 32, height: 32, borderRadius: 10, backgroundColor: DS.colors.surfaceSoft, alignItems: 'center', justifyContent: 'center', marginBottom: 10 },
+  statValue: { color: DS.colors.ink, ...displayType(30) },
+  statLabel: { color: DS.colors.muted, fontSize: 12, fontWeight: '600', marginTop: 2 },
 
-  proUpgradeBanner: {
-    backgroundColor: DS.colors.primaryLight,
-    borderWidth: 1.5,
-    borderColor: DS.colors.primary,
-    borderRadius: DS.radius.lg,
-    padding: 16,
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginBottom: 20,
-    ...DS.shadow.primary,
-  },
+  proUpgradeBanner: { flexDirection: 'row', alignItems: 'center', backgroundColor: DS.colors.surface, borderRadius: 20, borderWidth: 1, borderColor: DS.colors.border, padding: 16, marginBottom: 14 },
   inlineIconLabel: { flexDirection: 'row', alignItems: 'center', gap: 7 },
   proCrownIcon: {
     fontSize: 26,
   },
-  proBannerTitle: {
-    color: DS.colors.ink,
-    fontSize: DS.font.bodyMd,
-    fontWeight: '800',
-  },
-  proBannerSub: {
-    color: DS.colors.muted,
-    fontSize: DS.font.xs,
-    marginTop: 2,
-    lineHeight: 16,
-  },
+  proBannerTitle: { color: DS.colors.ink, fontSize: 16, fontWeight: '800' },
+  proBannerSub: { color: DS.colors.muted, fontSize: 13, marginTop: 2 },
   proBannerArrow: {
     color: DS.colors.primary,
     fontSize: 24,
@@ -658,33 +607,16 @@ const styles = StyleSheet.create({
   noticeBody: { color: DS.colors.muted, fontSize: DS.font.sm, lineHeight: 21, textAlign: 'center' },
 
   // Auth card
-  authCard: {
-    backgroundColor: DS.colors.surface,
-    borderRadius: DS.radius.xl,
-    padding: 22, marginBottom: 22,
-    borderWidth: 1, borderColor: DS.colors.border,
-    ...DS.shadow.card,
-  },
-  authCardTitle: { color: DS.colors.ink, fontSize: DS.font.h3, fontWeight: '800', marginBottom: 6 },
-  authCardSubtitle: { color: DS.colors.muted, fontSize: DS.font.sm, marginBottom: 18, lineHeight: 20 },
+  authCard: { backgroundColor: DS.colors.surface, borderRadius: 26, borderWidth: 1, borderColor: DS.colors.border, padding: 20, marginBottom: 14, ...DS.shadow.card },
+  authCardTitle: { color: DS.colors.ink, ...displayType(30) },
+  authCardSubtitle: { color: DS.colors.muted, fontSize: 14, lineHeight: 20, marginTop: 4, marginBottom: 16 },
 
-  oauthRow: { flexDirection: 'row', gap: 10 },
-  googleButton: {
-    flex: 1, backgroundColor: DS.colors.surface,
-    borderWidth: 1.5, borderColor: DS.colors.borderStrong,
-    borderRadius: DS.radius.md, paddingVertical: 12,
-    alignItems: 'center', justifyContent: 'center',
-    ...DS.shadow.card,
-  },
-  googleBrandRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
-  googleGContainer: {
-    width: 22, height: 22, borderRadius: 11,
-    backgroundColor: DS.colors.surfaceDim,
-    borderWidth: 1, borderColor: DS.colors.border,
-    alignItems: 'center', justifyContent: 'center',
-  },
-  googleGLogo: { fontSize: 13, fontWeight: '900', color: '#4285F4' },
-  googleBrandText: { fontSize: DS.font.bodyMd, fontWeight: '800', letterSpacing: 0.5 },
+  oauthRow: { gap: 10 },
+  googleButton: { height: 54, borderRadius: 16, backgroundColor: DS.colors.ink, alignItems: 'center', justifyContent: 'center' },
+  googleBrandRow: { flexDirection: 'row', alignItems: 'center', gap: 12 },
+  googleGContainer: { width: 26, height: 26, borderRadius: 13, backgroundColor: '#FFFFFF', alignItems: 'center', justifyContent: 'center' },
+  googleGLogo: { color: '#4285F4', fontSize: 16, fontWeight: '900', lineHeight: 19 },
+  googleBrandText: { color: '#FFFFFF', fontSize: 16, fontWeight: '700' },
   appleButton: {
     flex: 1, backgroundColor: '#000',
     borderRadius: DS.radius.md, paddingVertical: 12,
@@ -697,29 +629,14 @@ const styles = StyleSheet.create({
   dividerLine: { flex: 1, height: 1, backgroundColor: DS.colors.border },
   dividerText: { color: DS.colors.subtle, fontSize: DS.font.xxs, marginHorizontal: 10 },
 
-  input: {
-    height: 52, borderWidth: 1, borderColor: DS.colors.border,
-    borderRadius: DS.radius.md, paddingHorizontal: 16,
-    color: DS.colors.ink, marginTop: 10,
-    backgroundColor: DS.colors.surfaceDim,
-    fontSize: DS.font.bodyMd,
-  },
+  input: { height: 52, borderRadius: 14, borderWidth: 1, borderColor: DS.colors.border, backgroundColor: DS.colors.canvas, paddingHorizontal: 16, color: DS.colors.ink, fontSize: 15, marginBottom: 10 },
   forgotBtn: { alignSelf: 'flex-end', marginTop: 8, paddingVertical: 4 },
   forgotBtnText: { color: DS.colors.primary, fontSize: DS.font.xs, fontWeight: '600' },
 
-  primaryButton: {
-    backgroundColor: DS.colors.primary,
-    borderRadius: DS.radius.md, alignItems: 'center', justifyContent: 'center',
-    paddingVertical: 15, marginTop: 14, width: '100%',
-    ...DS.shadow.primary,
-  },
-  primaryText: { color: '#FFF', fontWeight: '800', fontSize: DS.font.bodyMd, textAlign: 'center' },
-  secondaryButton: {
-    backgroundColor: '#7C3AED',
-    borderRadius: DS.radius.md, alignItems: 'center', justifyContent: 'center',
-    paddingVertical: 15, marginTop: 10, width: '100%',
-  },
-  secondaryText: { color: '#FFF', fontWeight: '800', fontSize: DS.font.bodyMd, textAlign: 'center' },
+  primaryButton: { height: 52, borderRadius: 16, backgroundColor: DS.colors.primary, alignItems: 'center', justifyContent: 'center', marginTop: 4, ...DS.shadow.primary },
+  primaryText: { color: '#FFFFFF', fontSize: 15, fontWeight: '800' },
+  secondaryButton: { height: 52, borderRadius: 16, backgroundColor: DS.colors.surface, borderWidth: 1, borderColor: DS.colors.borderStrong, alignItems: 'center', justifyContent: 'center', marginTop: 10 },
+  secondaryText: { color: DS.colors.ink, fontSize: 15, fontWeight: '700' },
   buttonDimmed: { opacity: 0.6 },
   loadingRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center' },
 
@@ -761,10 +678,7 @@ const styles = StyleSheet.create({
   deleteAccountText: { color: DS.colors.danger, fontSize: DS.font.xs, fontWeight: '700' },
 
   // App info section
-  sectionTitle: {
-    color: DS.colors.ink, fontSize: DS.font.h3,
-    fontWeight: '800', marginBottom: 10,
-  },
+  sectionTitle: { color: DS.colors.ink, fontSize: 12, fontWeight: '800', letterSpacing: 1.3, textTransform: 'uppercase', marginTop: 10, marginBottom: 10 },
   infoRow: {
     backgroundColor: DS.colors.surface, borderRadius: DS.radius.md, padding: 18,
     marginBottom: 10, flexDirection: 'row', justifyContent: 'space-between',

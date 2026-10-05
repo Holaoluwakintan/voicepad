@@ -18,6 +18,7 @@ import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
 import { useAuth } from '@/lib/auth';
 import { DS } from '@/constants/design';
+import { Sparkles } from 'lucide-react-native';
 
 type PlanTier = 'annual' | 'monthly';
 
@@ -85,7 +86,7 @@ export default function UpgradeScreen() {
 
           {/* Hero */}
           <View style={styles.heroBlock}>
-            <ThemedText style={styles.heroEmoji}>✨</ThemedText>
+            <View style={styles.heroEmoji}><Sparkles size={30} color={DS.colors.primary} strokeWidth={2} /></View>
             <ThemedText style={styles.heroTitle}>Unlock Your Full AI Superpowers</ThemedText>
             <ThemedText style={styles.heroSubtitle}>
               Transform hours of lectures, sermons, and meetings into crisp, structured notes with zero ads and zero limits.
@@ -95,7 +96,7 @@ export default function UpgradeScreen() {
           {/* Current Pro status pill if active */}
           {isCurrentPro && (
             <View style={styles.activePill}>
-              <ThemedText style={styles.activePillText}>✓ You are already a VoicePad Pro member</ThemedText>
+              <ThemedText style={styles.activePillText}>You are already a VoicePad Pro member</ThemedText>
             </View>
           )}
 
@@ -247,10 +248,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     marginBottom: 24,
   },
-  heroEmoji: {
-    fontSize: 48,
-    marginBottom: 10,
-  },
+  heroEmoji: { width: 64, height: 64, borderRadius: 32, backgroundColor: DS.colors.primaryLight, alignItems: 'center', justifyContent: 'center', alignSelf: 'center', marginBottom: 12 },
   heroTitle: {
     color: DS.colors.ink,
     fontSize: DS.font.display,

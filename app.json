@@ -1,13 +1,13 @@
 {
   "expo": {
-    "name": "voicepad",
+    "name": "VoicePad",
     "slug": "voicepad",
-    "version": "1.0.0",
+    "version": "1.1.0",
     "description": "Private AI voice notes, transcription, summaries, and photo-to-text capture for ideas that should not get lost.",
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
     "scheme": "voicepad",
-    "userInterfaceStyle": "automatic",
+    "userInterfaceStyle": "light",
     "newArchEnabled": true,
     "ios": {
       "bundleIdentifier": "com.holaoluwakintan.voicepad",
@@ -40,7 +40,8 @@
         "android.permission.FOREGROUND_SERVICE",
         "android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK"
       ],
-      "predictiveBackGestureEnabled": false
+      "predictiveBackGestureEnabled": false,
+      "versionCode": 4
     },
     "plugins": [
       "expo-router",
@@ -52,7 +53,13 @@
           "imageWidth": 76
         }
       ],
-      "expo-audio",
+      [
+        "expo-audio",
+        {
+          "microphonePermission": "VoicePad needs microphone access to record voice notes, sermons, lectures, and meetings for AI transcription.",
+          "enableBackgroundRecording": true
+        }
+      ],
       "expo-sqlite",
       "expo-secure-store",
       [

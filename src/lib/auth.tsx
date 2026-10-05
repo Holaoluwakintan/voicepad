@@ -8,6 +8,54 @@ import { toFriendlyErrorMessage } from '@/lib/utils';
 
 WebBrowser.maybeCompleteAuthSession();
 
+let pendingExchange: Promise<Session | null> | null = null;
+
+/**
+ * Completes an OAuth redirect URL (voicepad://auth/callback?code=… or #access_token=…).
+ * The same URL can reach us twice on Android (browser result + deep link to
+ * /auth/callback); the single in-flight promise makes the code exchange run once.
+ */
+export async function completeOAuthFromUrl(
+  client: NonNullable<typeof supabase>,
+  url: string
+): Promise<Session | null> {
+  const query = url.includes('?') ? url.split('?')[1].split('#')[0] : '';
+  const fragment = url.includes('#') ? url.split('#')[1] : '';
+  const params = new URLSearchParams(query);
+  const hash = new URLSearchParams(fragment);
+  const errorText = params.get('error_description') || hash.get('error_description') || params.get('error') || hash.get('error');
+  if (errorText) throw new Error(errorText.replace(/\+/g, ' '));
+
+  const code = params.get('code');
+  if (code) {
+    if (!pendingExchange) {
+      pendingExchange = (async () => {
+        const { data, error } = await client.auth.exchangeCodeForSession(code);
+        if (error) {
+          // A second exchange of the same code fails; the first one may already have succeeded.
+          const { data: current } = await client.auth.getSession();
+          if (current.session) return current.session;
+          throw error;
+        }
+        return data.session;
+      })().finally(() => {
+        setTimeout(() => { pendingExchange = null; }, 2000);
+      });
+    }
+    return pendingExchange;
+  }
+
+  const accessToken = hash.get('access_token');
+  const refreshToken = hash.get('refresh_token');
+  if (accessToken && refreshToken) {
+    const { data, error } = await client.auth.setSession({ access_token: accessToken, refresh_token: refreshToken });
+    if (error) throw error;
+    return data.session;
+  }
+  const { data: current } = await client.auth.getSession();
+  return current.session;
+}
+
 
 type AuthContextValue = {
   user: User | null;
@@ -128,18 +176,19 @@ export function AuthProvider({ children }: PropsWithChildren) {
           if (error) throw error;
 
           if (Platform.OS !== 'web' && data?.url) {
-            const result = await WebBrowser.openAuthSessionAsync(data.url, redirectUrl);
+            const result = await WebBrowser.openAuthSessionAsync(data.url, redirectUrl, {
+              showInRecents: true,
+            });
             if (result.type === 'success' && result.url) {
-              const parsed = Linking.parse(result.url);
-              const code = parsed.queryParams?.code;
-              if (typeof code === 'string') {
-                const { data: sessionData, error: exchangeError } =
-                  await client.auth.exchangeCodeForSession(code);
-                if (exchangeError) throw exchangeError;
-                if (sessionData?.session) {
-                  setSession(sessionData.session);
-                }
-              }
+              const session = await completeOAuthFromUrl(client, result.url);
+              if (session) setSession(session);
+              else throw new Error('Google did not return a sign-in session. Please try again.');
+            } else if (result.type === 'cancel' || result.type === 'dismiss') {
+              // The deep link may still have reached /auth/callback (some Android
+              // browsers close the custom tab before returning). Check once.
+              const { data: current } = await client.auth.getSession();
+              if (current.session) setSession(current.session);
+              else return { error: 'Sign-in was cancelled.' };
             }
           }
           return { error: null };
