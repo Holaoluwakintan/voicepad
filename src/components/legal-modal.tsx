@@ -16,7 +16,7 @@ import * as Haptics from 'expo-haptics';
 
 import { ThemedText } from './themed-text';
 import { DS } from '@/constants/design';
-import { TERMS_OF_SERVICE, PRIVACY_POLICY } from '@/constants/legal';
+import { LEGAL_CONTACT_EMAIL, TERMS_OF_SERVICE, PRIVACY_POLICY } from '@/constants/legal';
 
 interface LegalModalProps {
   visible: boolean;
@@ -127,15 +127,23 @@ export function LegalModal({ visible, initialDoc = 'terms', onClose }: LegalModa
                 <ThemedText style={styles.sectionHeading}>
                   {section.title}
                 </ThemedText>
-                <ThemedText style={styles.sectionBody}>
-                  {section.content}
-                </ThemedText>
+                {section.link === 'privacy' ? (
+                  <Pressable onPress={() => switchDoc('privacy')} accessibilityRole="link" accessibilityLabel="Open Privacy Policy">
+                    <ThemedText style={[styles.sectionBody, styles.linkText]}>
+                      {section.content}
+                    </ThemedText>
+                  </Pressable>
+                ) : (
+                  <ThemedText style={styles.sectionBody}>
+                    {section.content}
+                  </ThemedText>
+                )}
               </View>
             ))}
 
             <View style={styles.footerNote}>
               <ThemedText style={styles.footerNoteText}>
-                VoicePad is engineered with a local-first commitment. Questions about these terms can be directed to support@voicepad.app.
+                Questions: {LEGAL_CONTACT_EMAIL}
               </ThemedText>
             </View>
           </ScrollView>
@@ -266,6 +274,7 @@ const styles = StyleSheet.create({
     fontWeight: '800',
     marginBottom: 10,
   },
+  linkText: { color: DS.colors.primary, fontWeight: '700', textDecorationLine: 'underline' },
   sectionBody: {
     color: DS.colors.ink,
     fontSize: DS.font.sm,

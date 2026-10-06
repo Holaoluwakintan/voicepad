@@ -1,13 +1,13 @@
 {
   "expo": {
-    "name": "voicepad",
+    "name": "VoicePad",
     "slug": "voicepad",
-    "version": "1.0.0",
+    "version": "1.1.5",
     "description": "Private AI voice notes, transcription, summaries, and photo-to-text capture for ideas that should not get lost.",
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
     "scheme": "voicepad",
-    "userInterfaceStyle": "automatic",
+    "userInterfaceStyle": "light",
     "newArchEnabled": true,
     "ios": {
       "bundleIdentifier": "com.holaoluwakintan.voicepad",
@@ -26,7 +26,7 @@
     "android": {
       "package": "com.holaoluwakintan.voicepad",
       "adaptiveIcon": {
-        "backgroundColor": "#E6F4FE",
+        "backgroundColor": "#F9FBFF",
         "foregroundImage": "./assets/images/android-icon-foreground.png",
         "backgroundImage": "./assets/images/android-icon-background.png",
         "monochromeImage": "./assets/images/android-icon-monochrome.png"
@@ -40,19 +40,29 @@
         "android.permission.FOREGROUND_SERVICE",
         "android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK"
       ],
-      "predictiveBackGestureEnabled": false
+      "predictiveBackGestureEnabled": false,
+      "versionCode": 9,
+      "blockedPermissions": [
+        "android.permission.SYSTEM_ALERT_WINDOW"
+      ]
     },
     "plugins": [
       "expo-router",
       [
         "expo-splash-screen",
         {
-          "backgroundColor": "#111426",
+          "backgroundColor": "#F9FBFF",
           "image": "./assets/images/splash-icon.png",
-          "imageWidth": 76
+          "imageWidth": 200
         }
       ],
-      "expo-audio",
+      [
+        "expo-audio",
+        {
+          "microphonePermission": "VoicePad needs microphone access to record voice notes, sermons, lectures, and meetings for AI transcription.",
+          "enableBackgroundRecording": true
+        }
+      ],
       "expo-sqlite",
       "expo-secure-store",
       [
@@ -63,6 +73,8 @@
         }
       ],
       "expo-document-picker",
+      "./plugins/with-share-intent",
+      "./plugins/with-android-build-props",
       [
         "react-native-google-mobile-ads",
         {

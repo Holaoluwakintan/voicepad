@@ -4,9 +4,77 @@ import { Platform } from 'react-native';
 import * as Linking from 'expo-linking';
 import * as WebBrowser from 'expo-web-browser';
 import { isSupabaseConfigured, supabase } from './supabase';
+import { deleteAllCloudAudioForCurrentUser } from './storage';
 import { toFriendlyErrorMessage } from '@/lib/utils';
 
 WebBrowser.maybeCompleteAuthSession();
+
+let pendingExchange: Promise<Session | null> | null = null;
+
+/**
+ * Completes an OAuth redirect URL (voicepad://auth/callback?code=… or #access_token=…).
+ * The same URL can reach us twice on Android (browser result + deep link to
+ * /auth/callback); the single in-flight promise makes the code exchange run once.
+ */
+/**
+ * Supabase reports provider failures in the redirect URL. Turn the raw text
+ * (which can include Google's one-time code) into something a person can act on.
+ */
+export function friendlyOAuthError(raw: string): string {
+  const text = raw.trim();
+  if (/unable to exchange external code/i.test(text)) {
+    return 'Google sign-in is down for now (a setup issue on our side, not your account). Please use email and password below. [exchange_failed]';
+  }
+  if (/access[_ ]denied/i.test(text)) {
+    return 'Google sign-in was blocked or cancelled. [access_denied]';
+  }
+  if (/redirect/i.test(text) && /not allowed|mismatch/i.test(text)) {
+    return 'Google sign-in setup error (redirect not allowed). Please use email and password below. [redirect]';
+  }
+  // Never echo an authorization code back to the screen.
+  return text.replace(/4\/[0-9A-Za-z_-]{10,}/g, '…').slice(0, 200);
+}
+
+export async function completeOAuthFromUrl(
+  client: NonNullable<typeof supabase>,
+  url: string
+): Promise<Session | null> {
+  const query = url.includes('?') ? url.split('?')[1].split('#')[0] : '';
+  const fragment = url.includes('#') ? url.split('#')[1] : '';
+  const params = new URLSearchParams(query);
+  const hash = new URLSearchParams(fragment);
+  const errorText = params.get('error_description') || hash.get('error_description') || params.get('error') || hash.get('error');
+  if (errorText) throw new Error(friendlyOAuthError(decodeURIComponent(errorText.replace(/\+/g, ' '))));
+
+  const code = params.get('code');
+  if (code) {
+    if (!pendingExchange) {
+      pendingExchange = (async () => {
+        const { data, error } = await client.auth.exchangeCodeForSession(code);
+        if (error) {
+          // A second exchange of the same code fails; the first one may already have succeeded.
+          const { data: current } = await client.auth.getSession();
+          if (current.session) return current.session;
+          throw error;
+        }
+        return data.session;
+      })().finally(() => {
+        setTimeout(() => { pendingExchange = null; }, 2000);
+      });
+    }
+    return pendingExchange;
+  }
+
+  const accessToken = hash.get('access_token');
+  const refreshToken = hash.get('refresh_token');
+  if (accessToken && refreshToken) {
+    const { data, error } = await client.auth.setSession({ access_token: accessToken, refresh_token: refreshToken });
+    if (error) throw error;
+    return data.session;
+  }
+  const { data: current } = await client.auth.getSession();
+  return current.session;
+}
 
 
 type AuthContextValue = {
@@ -128,18 +196,19 @@ export function AuthProvider({ children }: PropsWithChildren) {
           if (error) throw error;
 
           if (Platform.OS !== 'web' && data?.url) {
-            const result = await WebBrowser.openAuthSessionAsync(data.url, redirectUrl);
+            const result = await WebBrowser.openAuthSessionAsync(data.url, redirectUrl, {
+              showInRecents: true,
+            });
             if (result.type === 'success' && result.url) {
-              const parsed = Linking.parse(result.url);
-              const code = parsed.queryParams?.code;
-              if (typeof code === 'string') {
-                const { data: sessionData, error: exchangeError } =
-                  await client.auth.exchangeCodeForSession(code);
-                if (exchangeError) throw exchangeError;
-                if (sessionData?.session) {
-                  setSession(sessionData.session);
-                }
-              }
+              const session = await completeOAuthFromUrl(client, result.url);
+              if (session) setSession(session);
+              else throw new Error('Google did not return a sign-in session. Please try again.');
+            } else if (result.type === 'cancel' || result.type === 'dismiss') {
+              // The deep link may still have reached /auth/callback (some Android
+              // browsers close the custom tab before returning). Check once.
+              const { data: current } = await client.auth.getSession();
+              if (current.session) setSession(current.session);
+              else return { error: 'Sign-in was cancelled.' };
             }
           }
           return { error: null };
@@ -199,6 +268,10 @@ export function AuthProvider({ children }: PropsWithChildren) {
       deleteAccount: async () => {
         if (!supabase) return { error: null };
         try {
+          // Remove any recordings that versions before 1.1.3 backed up to cloud storage.
+          // Postgres can no longer delete storage files directly, so this goes through the
+          // Storage API while the user is still signed in (best effort; never blocks deletion).
+          await deleteAllCloudAudioForCurrentUser();
           const { error: rpcError } = await supabase.rpc('delete_user_account');
           if (rpcError) {
             return {

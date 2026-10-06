@@ -18,15 +18,16 @@ import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
 import { useAuth } from '@/lib/auth';
 import { DS } from '@/constants/design';
+import { Sparkles } from 'lucide-react-native';
 
 type PlanTier = 'annual' | 'monthly';
 
 const PRO_FEATURES = [
   { icon: '🚫', title: '100% Ad-Free Experience', desc: 'Zero banner ads, zero interruptions ever' },
   { icon: '⚡', title: 'Unlimited AI Transcription', desc: 'No daily limits — record lectures, sermons & meetings of any length' },
-  { icon: '🧠', title: 'Priority Groq & Gemini Models', desc: 'Access to ultra-fast Whisper Large-v3 and Llama 3.3 70B summaries' },
-  { icon: '📖', title: 'Unlimited Multi-Page Book Scan', desc: 'Scan up to 20 pages at once with high-res Gemini Vision OCR' },
-  { icon: '☁️', title: 'Full Cloud Backup & Multi-Device Sync', desc: 'Automatic encrypted backup of notes and audio across all devices' },
+  { icon: '🧠', title: 'Priority AI Processing', desc: 'Fast, accurate transcription and smarter AI summaries' },
+  { icon: '📖', title: 'Unlimited Multi-Page Book Scan', desc: 'Scan up to 20 pages at once with high-accuracy text recognition' },
+  { icon: '☁️', title: 'Full Cloud Backup & Multi-Device Sync', desc: 'Encrypted backup of your notes, transcripts and summaries across all devices. Audio stays on your phone.' },
   { icon: '📄', title: 'Formatted PDF & Markdown Export', desc: 'Export structured study guides and meeting minutes directly' },
 ];
 
@@ -52,18 +53,6 @@ export default function UpgradeScreen() {
     );
   }
 
-  async function handleRestorePurchases() {
-    try { await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light); } catch {}
-    setIsProcessing(true);
-    setTimeout(() => {
-      setIsProcessing(false);
-      if (isCurrentPro) {
-        Alert.alert('Purchases Restored', 'Your VoicePad Pro subscription is active.');
-      } else {
-        Alert.alert('No Prior Purchases Found', 'We could not find an active subscription tied to this account.');
-      }
-    }, 1200);
-  }
 
   return (
     <ThemedView style={styles.container}>
@@ -85,7 +74,7 @@ export default function UpgradeScreen() {
 
           {/* Hero */}
           <View style={styles.heroBlock}>
-            <ThemedText style={styles.heroEmoji}>✨</ThemedText>
+            <View style={styles.heroEmoji}><Sparkles size={30} color={DS.colors.primary} strokeWidth={2} /></View>
             <ThemedText style={styles.heroTitle}>Unlock Your Full AI Superpowers</ThemedText>
             <ThemedText style={styles.heroSubtitle}>
               Transform hours of lectures, sermons, and meetings into crisp, structured notes with zero ads and zero limits.
@@ -95,7 +84,7 @@ export default function UpgradeScreen() {
           {/* Current Pro status pill if active */}
           {isCurrentPro && (
             <View style={styles.activePill}>
-              <ThemedText style={styles.activePillText}>✓ You are already a VoicePad Pro member</ThemedText>
+              <ThemedText style={styles.activePillText}>You are already a VoicePad Pro member</ThemedText>
             </View>
           )}
 
@@ -176,7 +165,7 @@ export default function UpgradeScreen() {
                 ? 'Activating Pro…'
                 : isCurrentPro
                 ? 'Manage Active Subscription'
-                : `Start Pro Plan — ${selectedPlan === 'annual' ? '$39.99/year' : '$4.99/month'}`}
+                : `Coming soon · ${selectedPlan === 'annual' ? '$39.99/year' : '$4.99/month'}`}
             </ThemedText>
           </Pressable>
 
@@ -186,10 +175,6 @@ export default function UpgradeScreen() {
 
           {/* Footer links */}
           <View style={styles.footerRow}>
-            <Pressable onPress={handleRestorePurchases} accessibilityRole="button">
-              <ThemedText style={styles.footerLink}>Restore purchases</ThemedText>
-            </Pressable>
-            <ThemedText style={styles.footerDivider}>•</ThemedText>
             <Pressable onPress={() => router.push('/terms')} accessibilityRole="button">
               <ThemedText style={styles.footerLink}>Terms</ThemedText>
             </Pressable>
@@ -247,10 +232,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     marginBottom: 24,
   },
-  heroEmoji: {
-    fontSize: 48,
-    marginBottom: 10,
-  },
+  heroEmoji: { width: 64, height: 64, borderRadius: 32, backgroundColor: DS.colors.primaryLight, alignItems: 'center', justifyContent: 'center', alignSelf: 'center', marginBottom: 12 },
   heroTitle: {
     color: DS.colors.ink,
     fontSize: DS.font.display,

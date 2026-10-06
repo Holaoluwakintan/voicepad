@@ -50,12 +50,14 @@ export const SUPPORTED_AUDIO_TYPES = [
   'audio/wav',
   'audio/wave',
   'audio/ogg',
+  'audio/opus',
+  'application/ogg',
   'audio/webm',
   'audio/aac',
   'audio/flac',
 ];
 
-export const SUPPORTED_AUDIO_EXTENSIONS = ['.mp3', '.m4a', '.mp4', '.wav', '.ogg', '.webm', '.aac', '.flac'];
+export const SUPPORTED_AUDIO_EXTENSIONS = ['.mp3', '.m4a', '.mp4', '.wav', '.ogg', '.opus', '.webm', '.aac', '.flac'];
 
 /** Returns true if the given file is a supported audio format */
 export function isSupportedAudio(name = '', mimeType = ''): boolean {

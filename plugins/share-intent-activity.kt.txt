@@ -1,0 +1,83 @@
+  // @voicepad-share begin (mirrored by plugins/with-share-intent.js)
+  // Android Share sheet -> VoicePad (e.g. WhatsApp voice notes, shared as a content:// URI
+  // with type audio/ogg). The shared stream is copied into the app cache here, while the
+  // URI read grant is valid, and the intent is rewritten to a voicepad://share deep link
+  // so expo-router opens the share route on a cold start and via onNewIntent when open.
+  override fun onNewIntent(intent: Intent) {
+    val rewritten = rewriteShareIntent(intent) ?: intent
+    setIntent(rewritten)
+    super.onNewIntent(rewritten)
+  }
+
+  private fun rewriteShareIntent(intent: Intent?): Intent? {
+    if (intent == null) return null
+    val action = intent.action
+    if (action != Intent.ACTION_SEND && action != Intent.ACTION_SEND_MULTIPLE) return intent
+    // Relaunching from Recents re-delivers the original share; don't import it twice.
+    if ((intent.flags and Intent.FLAG_ACTIVITY_LAUNCHED_FROM_HISTORY) != 0) {
+      return Intent(Intent.ACTION_MAIN).setPackage(packageName)
+    }
+    return try {
+      val source = sharedUri(intent) ?: return intent
+      val mime = (intent.type ?: contentResolver.getType(source) ?: "audio/ogg").lowercase()
+      var name = displayName(source) ?: source.lastPathSegment ?: "shared-audio"
+      name = name.substringAfterLast('/').replace(Regex("[^A-Za-z0-9._ -]"), "_").take(80)
+      if (!name.contains('.')) name += extensionFor(mime)
+      val dir = File(cacheDir, "shared-audio")
+      dir.mkdirs()
+      val cutoff = System.currentTimeMillis() - 24L * 60 * 60 * 1000
+      dir.listFiles()?.forEach { if (it.lastModified() < cutoff) it.delete() }
+      val out = File(dir, "${System.currentTimeMillis()}-$name")
+      val input = contentResolver.openInputStream(source) ?: return intent
+      input.use { stream -> FileOutputStream(out).use { stream.copyTo(it) } }
+      if (out.length() == 0L) { out.delete(); return intent }
+      val from = try { referrer?.host ?: "" } catch (e: Exception) { "" }
+      val link = Uri.Builder()
+        .scheme("voicepad")
+        .authority("share")
+        .appendQueryParameter("file", Uri.fromFile(out).toString())
+        .appendQueryParameter("name", name)
+        .appendQueryParameter("mime", mime)
+        .appendQueryParameter("from", from)
+        .appendQueryParameter("at", System.currentTimeMillis().toString())
+        .build()
+      Intent(Intent.ACTION_VIEW, link).setPackage(packageName)
+    } catch (e: Exception) {
+      Log.w("VoicePadShare", "Could not import shared audio", e)
+      intent
+    }
+  }
+
+  @Suppress("DEPRECATION")
+  private fun sharedUri(intent: Intent): Uri? {
+    val fromExtra: Uri? = if (intent.action == Intent.ACTION_SEND_MULTIPLE) {
+      intent.getParcelableArrayListExtra<Uri>(Intent.EXTRA_STREAM)?.firstOrNull()
+    } else {
+      intent.getParcelableExtra(Intent.EXTRA_STREAM) as? Uri
+    }
+    if (fromExtra != null) return fromExtra
+    val clip = intent.clipData
+    return if (clip != null && clip.itemCount > 0) clip.getItemAt(0).uri else null
+  }
+
+  private fun displayName(uri: Uri): String? {
+    if (uri.scheme == "file") return uri.lastPathSegment
+    return try {
+      contentResolver.query(uri, arrayOf(OpenableColumns.DISPLAY_NAME), null, null, null)?.use { c ->
+        if (c.moveToFirst()) c.getString(0) else null
+      }
+    } catch (e: Exception) { null }
+  }
+
+  private fun extensionFor(mime: String): String = when {
+    mime.contains("opus") -> ".opus"
+    mime.contains("ogg") -> ".ogg"
+    mime.contains("mpeg") || mime.contains("mp3") -> ".mp3"
+    mime.contains("mp4") || mime.contains("m4a") || mime.contains("aac") -> ".m4a"
+    mime.contains("wav") -> ".wav"
+    mime.contains("amr") -> ".amr"
+    mime.contains("webm") -> ".webm"
+    mime.contains("flac") -> ".flac"
+    else -> ".ogg"
+  }
+  // @voicepad-share end

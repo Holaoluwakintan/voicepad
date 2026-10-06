@@ -10,9 +10,12 @@ import {
   useAudioRecorderState,
 } from 'expo-audio';
 import { useLocalSearchParams, useRouter } from 'expo-router';
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import {
   Alert,
+  BackHandler,
+  Linking,
+  Platform,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -22,6 +25,8 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import * as Haptics from 'expo-haptics';
 import * as Clipboard from 'expo-clipboard';
 import * as DocumentPicker from 'expo-document-picker';
+import * as FileSystem from 'expo-file-system/legacy';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { AlertCircle, ArrowLeft, FileAudio, LockKeyhole, Mic, RotateCcw, Square, Upload } from 'lucide-react-native';
 import Animated, {
   useSharedValue,
@@ -38,15 +43,16 @@ import { AudioWaveform } from '@/components/audio-waveform';
 import { AudioPlayerView } from '@/components/audio-player-view';
 import { insertNote, updateNote, Note, loadNotes, NoteCategory, removeNote } from '@/lib/notes';
 import { transcribeAudio, wakeUpTranscriptionServer } from '@/lib/transcription';
-import { uploadAudioToCloud } from '@/lib/storage';
 import { useAuth } from '@/lib/auth';
-import { DS } from '@/constants/design';
+import { CONSENT_STORAGE_KEY } from '@/constants/legal';
+import { DS, displayType } from '@/constants/design';
+import { AuroraBackdrop } from '@/components/premium-ui';
 import { generateNoteId, isSupportedAudio, SUPPORTED_AUDIO_EXTENSIONS, toFriendlyErrorMessage } from '@/lib/utils';
 
 type TranscriptState = 'idle' | 'saving' | 'transcribing' | 'uploading' | 'ready' | 'failed';
 
 const LANGUAGES = [
-  { code: 'auto', label: '🌐 Auto-detect' },
+  { code: 'auto', label: 'Auto-detect' },
   { code: 'en', label: '🇬🇧 English' },
   { code: 'fr', label: '🇫🇷 French' },
   { code: 'es', label: '🇪🇸 Spanish' },
@@ -61,10 +67,60 @@ const LANGUAGES = [
 ] as const;
 type LangCode = typeof LANGUAGES[number]['code'];
 
+// Recorder configs, tried in order. Some phones (Android Go editions especially)
+// refuse a particular sample rate / bitrate, so we fall back to safer settings.
+const MAIN_RECORDING_OPTIONS = {
+  ...RecordingPresets.HIGH_QUALITY,
+  numberOfChannels: 1,
+  bitRate: 48000,
+  sampleRate: 32000,
+  directory: 'document' as const,
+  isMeteringEnabled: true,
+};
+// AAC 44.1 kHz mono is required by Android's compatibility rules, so nearly every phone has it.
+const SAFE_AAC_OPTIONS = {
+  ...RecordingPresets.HIGH_QUALITY,
+  numberOfChannels: 1,
+  bitRate: 64000,
+  sampleRate: 44100,
+  isMeteringEnabled: true,
+};
+// Last resort: AMR in a 3GP file (8 kHz voice codec present on every Android phone).
+const LAST_RESORT_3GP_OPTIONS = {
+  ...RecordingPresets.LOW_QUALITY,
+  numberOfChannels: 1,
+  bitRate: 12200,
+  sampleRate: 8000,
+  isMeteringEnabled: true,
+};
+
+type RecordingFormat = { extension: string; mimeType: string };
+const M4A_FORMAT: RecordingFormat = { extension: '.m4a', mimeType: 'audio/m4a' };
+const THREE_GP_FORMAT: RecordingFormat = { extension: '.3gp', mimeType: 'audio/3gpp' };
+
+function shortError(err: unknown): string {
+  const raw = err instanceof Error ? err.message : String(err ?? 'unknown error');
+  return raw.replace(/\s+/g, ' ').trim().slice(0, 160);
+}
+
 export default function RecordScreen() {
   const router = useRouter();
   const { user } = useAuth();
-  const { category: categoryParam } = useLocalSearchParams<{ category?: string }>();
+  const {
+    category: categoryParam,
+    sharedFile,
+    sharedName,
+    sharedMime,
+    sharedFrom,
+    sharedAt,
+  } = useLocalSearchParams<{
+    category?: string;
+    sharedFile?: string;
+    sharedName?: string;
+    sharedMime?: string;
+    sharedFrom?: string;
+    sharedAt?: string;
+  }>();
   const selectedCategory: NoteCategory =
     categoryParam && ['Lectures', 'Sermons', 'Meetings', 'Personal'].includes(categoryParam)
       ? (categoryParam as NoteCategory)
@@ -72,14 +128,7 @@ export default function RecordScreen() {
 
   // Optimized for clear voice speech while compressing file size 4x
   // (allows up to ~100 minutes of recording within the 25MB boundary)
-  const recorder = useAudioRecorder({
-    ...RecordingPresets.HIGH_QUALITY,
-    numberOfChannels: 1,
-    bitRate: 48000,
-    sampleRate: 32000,
-    directory: 'document',
-    isMeteringEnabled: true,
-  });
+  const recorder = useAudioRecorder(MAIN_RECORDING_OPTIONS);
   const recorderState = useAudioRecorderState(recorder);
 
   const [permission, setPermission] = useState<'checking' | 'granted' | 'denied'>('checking');
@@ -119,8 +168,16 @@ export default function RecordScreen() {
         true
       );
     } else {
-      pulseScale.value = withTiming(1, { duration: 250 });
-      pulseOpacity.value = withTiming(0, { duration: 250 });
+      // Idle: a slow, gentle "breathing" halo invites the first tap.
+      pulseScale.value = withRepeat(
+        withSequence(
+          withTiming(1.16, { duration: 1600, easing: Easing.inOut(Easing.ease) }),
+          withTiming(1, { duration: 1600, easing: Easing.inOut(Easing.ease) })
+        ),
+        -1,
+        true
+      );
+      pulseOpacity.value = withTiming(0.22, { duration: 400 });
     }
   }, [isRecording, pulseOpacity, pulseScale]);
 
@@ -129,34 +186,116 @@ export default function RecordScreen() {
     opacity: pulseOpacity.value,
   }));
 
+  // Android hardware back: without this, pressing back mid-recording unmounts the
+  // screen and silently throws the recording away.
+  useEffect(() => {
+    if (!isRecording && !isPaused) return;
+    const sub = BackHandler.addEventListener('hardwareBackPress', () => {
+      handleClosePress();
+      return true;
+    });
+    return () => sub.remove();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isRecording, isPaused]);
+
   useEffect(() => {
     // Pre-warm the cloud transcription server while the user prepares to record
     wakeUpTranscriptionServer();
     (async () => {
-      const result = await AudioModule.requestRecordingPermissionsAsync();
-      setPermission(result.granted ? 'granted' : 'denied');
-      await setAudioModeAsync({ allowsRecording: true, playsInSilentMode: true });
+      try {
+        // Opened from the Share sheet: don't interrupt the import with a mic prompt.
+        const result = sharedFile
+          ? await AudioModule.getRecordingPermissionsAsync()
+          : await AudioModule.requestRecordingPermissionsAsync();
+        setPermission(result.granted ? 'granted' : 'denied');
+      } catch {
+        setPermission('denied');
+      }
     })();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   // ─── Live recording ────────────────────────────────────────────────────────
 
-  async function start() {
-    if (permission !== 'granted') {
-      Alert.alert(
-        'Microphone permission required',
-        'Allow microphone access in Settings and try again.'
-      );
-      return;
-    }
+  const recordingFormatRef = useRef<RecordingFormat>(M4A_FORMAT);
+  const [recordError, setRecordError] = useState('');
+
+  async function ensureMicPermission(): Promise<boolean> {
     try {
-      await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Heavy);
-      await recorder.prepareToRecordAsync();
-      recorder.record();
-      setIsPaused(false);
+      const current = await AudioModule.getRecordingPermissionsAsync();
+      if (current.granted) return true;
+      const asked = await AudioModule.requestRecordingPermissionsAsync();
+      if (asked.granted) return true;
+    } catch {}
+    Alert.alert(
+      'Microphone is off for VoicePad',
+      'VoicePad needs the microphone to record. Open App settings → Permissions → Microphone and choose "Allow only while using the app".',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        { text: 'Open App settings', onPress: () => { Linking.openSettings().catch(() => {}); } },
+      ]
+    );
+    return false;
+  }
+
+  // Background recording (keeps going when the screen locks) runs as a foreground
+  // service with a notification. On Android 13+ expo-audio refuses to even prepare
+  // the recorder in that mode unless POST_NOTIFICATIONS is granted, so ask for it,
+  // and record in the foreground only if the user says no.
+  async function canRecordInBackground(): Promise<boolean> {
+    if (Platform.OS !== 'android') return true;
+    if (typeof Platform.Version === 'number' && Platform.Version < 33) return true;
+    try {
+      const res = await AudioModule.requestNotificationPermissionsAsync();
+      return !!res.granted;
     } catch {
-      Alert.alert('Could not start recording', 'Please try again.');
+      return false;
     }
+  }
+
+  async function start() {
+    setRecordError('');
+    const micOk = await ensureMicPermission();
+    setPermission(micOk ? 'granted' : 'denied');
+    if (!micOk) return;
+
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Heavy).catch(() => {});
+
+    const background = await canRecordInBackground();
+    const attempts: { label: string; options: typeof MAIN_RECORDING_OPTIONS | typeof SAFE_AAC_OPTIONS | typeof LAST_RESORT_3GP_OPTIONS; background: boolean; format: RecordingFormat }[] = [
+      ...(background ? [{ label: 'main+bg', options: MAIN_RECORDING_OPTIONS, background: true, format: M4A_FORMAT }] : []),
+      { label: 'main', options: MAIN_RECORDING_OPTIONS, background: false, format: M4A_FORMAT },
+      { label: 'aac44', options: SAFE_AAC_OPTIONS, background: false, format: M4A_FORMAT },
+      { label: '3gp', options: LAST_RESORT_3GP_OPTIONS, background: false, format: THREE_GP_FORMAT },
+    ];
+
+    const failures: string[] = [];
+    for (const attempt of attempts) {
+      try {
+        await setAudioModeAsync({
+          allowsRecording: true,
+          playsInSilentMode: true,
+          allowsBackgroundRecording: attempt.background,
+        });
+        await recorder.prepareToRecordAsync(attempt.options);
+        recorder.record();
+        recordingFormatRef.current = attempt.format;
+        setIsPaused(false);
+        return;
+      } catch (err) {
+        failures.push(`${attempt.label}: ${shortError(err)}`);
+        console.warn(`Recording attempt ${attempt.label} failed:`, err);
+        // Release a half-prepared recorder so the next attempt can prepare again.
+        try { await recorder.stop(); } catch {}
+      }
+    }
+
+    const details = failures.join('\n');
+    setRecordError(details);
+    Alert.alert(
+      'Could not start recording',
+      `Your phone refused the microphone. Close other apps that may be using it (calls, voice recorder) and try again.\n\nError details (please screenshot):\n${details}`
+    );
   }
 
   async function pause() {
@@ -248,15 +387,13 @@ export default function RecordScreen() {
       await insertNote(voiceNote);
       setTranscriptState('transcribing');
 
-      if (user?.id) {
-        uploadAudioToCloud(user.id, noteId, uri)
-          .then((path) => updateNote(noteId, path ? { audioPath: path, audioUploadStatus: 'uploaded' } : { audioUploadStatus: 'failed' }))
-          .catch(() => updateNote(noteId, { audioUploadStatus: 'failed' }));
-      }
+      // Privacy (v1.1.3): audio is never uploaded to cloud storage. It stays on this
+      // device; only the text (transcript, notes, summary) syncs for signed-in users.
 
-      transcribeSavedNote(uri, noteId);
-    } catch {
-      Alert.alert('Could not save recording', 'The recording could not be saved. Please try again.');
+      const format = recordingFormatRef.current;
+      transcribeSavedNote(uri, noteId, `voicepad-${noteId}${format.extension}`, format.mimeType);
+    } catch (err) {
+      Alert.alert('Could not save recording', `The recording could not be saved. Please try again.\n\nError details: ${shortError(err)}`);
       setTranscriptState('idle');
     }
   }
@@ -286,36 +423,12 @@ export default function RecordScreen() {
         return;
       }
 
-      const uri = asset.uri;
-      setSavedUri(uri);
-      const noteId = generateNoteId('voice');
-      setSavedNoteId(noteId);
-      setTranscriptState('saving');
-
-      try { Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium); } catch {}
-
-      const fileName = asset.name || 'uploaded-audio.m4a';
-      const voiceNote: Note = {
-        id: noteId,
-        title: `Uploaded · ${fileName.slice(0, 40)}`,
-        content: 'Audio file uploaded. Transcription starting…',
-        audioUri: uri,
-        source: 'voice',
-        category: selectedCategory,
-        createdAt: new Date().toISOString(),
-        transcriptionStatus: 'pending',
-      };
-
-      await insertNote(voiceNote);
-      setTranscriptState('transcribing');
-
-      if (user?.id) {
-        uploadAudioToCloud(user.id, noteId, uri)
-          .then((path) => updateNote(noteId, path ? { audioPath: path, audioUploadStatus: 'uploaded' } : { audioUploadStatus: 'failed' }))
-          .catch(() => updateNote(noteId, { audioUploadStatus: 'failed' }));
-      }
-
-      transcribeSavedNote(uri, noteId, fileName);
+      await importAudio({
+        sourceUri: asset.uri,
+        fileName: asset.name || 'uploaded-audio.m4a',
+        mimeType: asset.mimeType ?? undefined,
+        title: `Uploaded · ${(asset.name || 'uploaded-audio.m4a').slice(0, 40)}`,
+      });
     } catch (err) {
       const msg = err instanceof Error ? err.message : 'Could not open file picker.';
       Alert.alert('File picker error', msg);
@@ -323,9 +436,125 @@ export default function RecordScreen() {
     }
   }
 
+  /**
+   * Shared import pipeline for picked files and audio shared in from other apps
+   * (Android Share sheet). Copies the audio into the app's documents, creates the
+   * note and starts transcription, exactly like a recorded note.
+   * Audio stays on this device only (never uploaded to cloud storage).
+   */
+  async function importAudio(opts: {
+    sourceUri: string;
+    fileName: string;
+    mimeType?: string;
+    title: string;
+    keepTitle?: boolean;
+  }) {
+    const noteId = generateNoteId('voice');
+    const fileName = opts.fileName;
+    // A picker or share copy lives in the cache directory, which Android may purge;
+    // keep the audio with the app's documents so playback and retries keep working.
+    let uri = opts.sourceUri;
+    try {
+      if (FileSystem.documentDirectory) {
+        const ext = fileName.includes('.') ? fileName.slice(fileName.lastIndexOf('.')) : '.m4a';
+        const dest = `${FileSystem.documentDirectory}${noteId}${ext}`;
+        await FileSystem.copyAsync({ from: opts.sourceUri, to: dest });
+        uri = dest;
+        if (opts.sourceUri.includes('/shared-audio/')) {
+          FileSystem.deleteAsync(opts.sourceUri, { idempotent: true }).catch(() => {});
+        }
+      }
+    } catch (copyErr) {
+      console.warn('Could not copy audio to documents, using cache copy:', copyErr);
+    }
+    setSavedUri(uri);
+    setSavedNoteId(noteId);
+    setTranscriptText('');
+    setTranscriptError('');
+    setTranscriptState('saving');
+
+    try { Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium); } catch {}
+
+    const voiceNote: Note = {
+      id: noteId,
+      title: opts.title,
+      content: 'Audio file imported. Transcription starting…',
+      audioUri: uri,
+      source: 'voice',
+      category: selectedCategory,
+      createdAt: new Date().toISOString(),
+      transcriptionStatus: 'pending',
+    };
+
+    await insertNote(voiceNote);
+    setTranscriptState('transcribing');
+
+    transcribeSavedNote(uri, noteId, fileName, opts.mimeType, opts.keepTitle);
+  }
+
+  // ─── Audio shared in from another app (WhatsApp voice notes etc.) ─────────
+
+  const handledShareRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (!sharedFile) return;
+    const shareKey = `${sharedFile}|${sharedAt ?? ''}`;
+    if (handledShareRef.current === shareKey) return;
+    if (isRecording || isPaused) {
+      Alert.alert('Finish recording first', 'Stop the current recording, then share the voice note again.');
+      handledShareRef.current = shareKey;
+      return;
+    }
+    if (transcriptState === 'saving' || transcriptState === 'transcribing') {
+      Alert.alert('One at a time', 'VoicePad is still transcribing. Share the next voice note when this one is done.');
+      handledShareRef.current = shareKey;
+      return;
+    }
+    handledShareRef.current = shareKey;
+
+    let cancelled = false;
+    (async () => {
+      // Don't process audio before the user has accepted the terms and privacy policy.
+      while (!cancelled) {
+        const accepted = await AsyncStorage.getItem(CONSENT_STORAGE_KEY).catch(() => null);
+        if (accepted === 'true') break;
+        await new Promise((resolve) => setTimeout(resolve, 800));
+      }
+      if (cancelled) return;
+
+      const name = (sharedName || '').trim() || 'shared-audio.ogg';
+      const mime = (sharedMime || '').trim() || undefined;
+      if (!isSupportedAudio(name, mime ?? '')) {
+        Alert.alert(
+          'Unsupported format',
+          `VoicePad can transcribe these audio types:\n${SUPPORTED_AUDIO_EXTENSIONS.join(', ')}`
+        );
+        return;
+      }
+      const fromWhatsApp = /whatsapp/i.test(sharedFrom ?? '') || /^PTT-|WA\d{3,}/i.test(name);
+      const when = new Date().toLocaleString(undefined, {
+        month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit',
+      });
+      try {
+        await importAudio({
+          sourceUri: sharedFile,
+          fileName: name,
+          // Normalise e.g. "audio/ogg; codecs=opus" to a plain type the providers accept.
+          mimeType: mime ? mime.split(';')[0].trim() : undefined,
+          title: `${fromWhatsApp ? 'WhatsApp voice note' : 'Shared audio'} – ${when}`,
+          keepTitle: true,
+        });
+      } catch (err) {
+        Alert.alert('Could not import audio', toFriendlyErrorMessage(err, 'The shared audio could not be opened. Please try again.'));
+        setTranscriptState('idle');
+      }
+    })();
+    return () => { cancelled = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sharedFile, sharedAt]);
+
   // ─── Shared transcription ─────────────────────────────────────────────────
 
-  async function transcribeSavedNote(uri: string, noteId: string, filename?: string) {
+  async function transcribeSavedNote(uri: string, noteId: string, filename?: string, mimeType?: string, keepTitle = false) {
     // Cycle through reassuring progress messages so users don't think it's frozen
     setTranscribingMsg('Sending to AI…');
     const msgTimer = setInterval(() => {
@@ -336,14 +565,15 @@ export default function RecordScreen() {
       );
     }, 8000);
     try {
-      const result = await transcribeAudio(uri, { noteId, filename, language: selectedLanguage === 'auto' ? undefined : selectedLanguage });
+      const result = await transcribeAudio(uri, { noteId, filename, mimeType, language: selectedLanguage === 'auto' ? undefined : selectedLanguage });
       clearInterval(msgTimer);
       const notes = await loadNotes();
       const current = notes.find((n) => n.id === noteId);
-      const title =
-        result.text.split(/[.!?\n]/)[0]?.trim().slice(0, 64) ||
-        current?.title ||
-        'Voice note';
+      const title = keepTitle && current?.title
+        ? current.title
+        : result.text.split(/[.!?\n]/)[0]?.trim().slice(0, 64) ||
+          current?.title ||
+          'Voice note';
 
       await updateNote(noteId, {
         title,
@@ -409,6 +639,7 @@ export default function RecordScreen() {
 
   return (
     <ThemedView style={styles.container}>
+      <AuroraBackdrop variant={isRecording && !isPaused ? 'coral' : 'violet'} intensity={isRecording && !isPaused ? 1 : 0.75} />
       <SafeAreaView style={styles.safeArea}>
         <ScrollView
           style={styles.scroll}
@@ -471,7 +702,7 @@ export default function RecordScreen() {
               <View style={styles.progressIcon}><RotateCcw size={19} color={DS.colors.accent} strokeWidth={2.2} /></View><ThemedText style={styles.transcribingText}>
                 {transcribingMsg}{'\n'}
                 <ThemedText style={styles.transcribingNote}>
-                  Connecting to AI service. (If the server is waking up, this may take ~30s).
+                  This usually takes a few seconds. Longer recordings take a little more.
                 </ThemedText>
               </ThemedText>
               <Pressable
@@ -493,7 +724,7 @@ export default function RecordScreen() {
                   accessibilityRole="button"
                   accessibilityLabel="Sign in to your account"
                 >
-                  <ThemedText style={styles.signInToRetryBtnText}>🔑  Sign In to Transcribe</ThemedText>
+                  <ThemedText style={styles.signInToRetryBtnText}>Sign in to transcribe</ThemedText>
                 </Pressable>
               )}
             </View>
@@ -511,7 +742,7 @@ export default function RecordScreen() {
                     <View style={styles.authNoticeContent}>
                       <ThemedText style={styles.authNoticeTitle}>Guest Mode</ThemedText>
                       <ThemedText style={styles.authNoticeSub}>
-                        Sign in to enable AI cloud transcription & sync. Audio will be saved locally.
+                        Sign in for unlimited transcription and cloud sync. Guests get a few free notes a day.
                       </ThemedText>
                     </View>
                     <Pressable
@@ -561,10 +792,13 @@ export default function RecordScreen() {
                     accessibilityLabel="Start recording"
                     accessibilityRole="button"
                   >
-                    <Mic size={31} color={DARK_TEXT} strokeWidth={2.1} />
+                    <Mic size={34} color={DARK_TEXT} strokeWidth={2.2} />
                   </Pressable>
                 </View>
                 <ThemedText style={styles.hint}>Tap to start recording</ThemedText>
+                {recordError ? (
+                  <ThemedText style={styles.recordErrorText} selectable>{recordError}</ThemedText>
+                ) : null}
 
                 {/* Divider */}
                 <View style={styles.dividerRow}>
@@ -582,9 +816,14 @@ export default function RecordScreen() {
                 >
                   <View style={styles.uploadTitle}><Upload size={17} color={DARK_TEXT} strokeWidth={2.2} /><ThemedText style={styles.uploadBtnText}>Upload audio file</ThemedText></View>
                   <ThemedText style={styles.uploadBtnSub}>
-                    MP3, M4A, WAV, OGG, AAC, FLAC
+                    MP3, M4A, WAV, OGG, OPUS, AAC, FLAC
                   </ThemedText>
                 </Pressable>
+                {Platform.OS === 'android' ? (
+                  <ThemedText style={styles.shareTip}>
+                    Tip: in WhatsApp, long-press a voice note → Share → VoicePad
+                  </ThemedText>
+                ) : null}
               </View>
             )}
 
@@ -599,7 +838,7 @@ export default function RecordScreen() {
                     accessibilityLabel="Stop recording"
                     accessibilityRole="button"
                   >
-                    <Square size={24} color={DARK_TEXT} fill={DARK_TEXT} strokeWidth={2} />
+                    <Square size={26} color={DARK_TEXT} fill={DARK_TEXT} strokeWidth={2} />
                   </Pressable>
                 </View>
                 <ThemedText style={styles.hint}>
@@ -650,310 +889,153 @@ export default function RecordScreen() {
   );
 }
 
-const DARK_BG = DS.colors.ink;
+const DARK_BG = DS.colors.night;
 const DARK_TEXT = '#FFFFFF';
-const MUTED_TEXT = '#9B9CB5';
-const ACCENT = DS.colors.accent;
+const MUTED_TEXT = 'rgba(244,243,239,0.62)';
+const GLASS = 'rgba(255,255,255,0.07)';
+const GLASS_BORDER = 'rgba(255,255,255,0.10)';
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: DARK_BG },
   safeArea: { flex: 1 },
   scroll: { flex: 1 },
-  content: { paddingHorizontal: 24, paddingTop: 20, paddingBottom: 60 },
+  content: { paddingHorizontal: 22, paddingTop: 8, paddingBottom: 48, flexGrow: 1 },
 
-  header: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    marginBottom: 8,
-  },
+  header: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 4 },
   closeBtn: {
-    width: 44, height: 44,
-    alignItems: 'center',
-    justifyContent: 'center',
+    width: 42, height: 42, borderRadius: 21, backgroundColor: GLASS,
+    borderWidth: 1, borderColor: GLASS_BORDER, alignItems: 'center', justifyContent: 'center',
   },
-  closeBtnText: { color: DARK_TEXT, fontSize: 34, fontWeight: '300' },
-  headerTitle: {
-    color: DARK_TEXT,
-    fontSize: DS.font.bodyMd,
-    fontWeight: '800',
-    textTransform: 'uppercase',
-    letterSpacing: 1.2,
-  },
-  spacer: { width: 44 },
+  headerTitle: { color: MUTED_TEXT, fontSize: 12, fontWeight: '700', textTransform: 'uppercase', letterSpacing: 1.6 },
+  spacer: { width: 42 },
 
-  center: { alignItems: 'center', paddingVertical: 20 },
-  status: { color: MUTED_TEXT, fontSize: DS.font.bodyMd, fontWeight: '700', textAlign: 'center' },
+  center: { alignItems: 'center', paddingTop: 26, paddingBottom: 8 },
+  status: { color: '#EDEBFF', ...displayType(26, true), textAlign: 'center' },
   timer: {
     color: DARK_TEXT,
-    fontSize: 62,
+    fontSize: 64,
     lineHeight: 74,
-    fontWeight: '800',
-    marginTop: 8,
-    marginBottom: 28,
+    fontWeight: '200',
+    letterSpacing: 1,
+    fontVariant: ['tabular-nums'],
+    marginTop: 6,
+    marginBottom: 18,
   },
-  timerRecording: {
-    color: '#FF7A8A',
-    textShadowColor: 'rgba(239,84,114,0.45)',
-    textShadowOffset: { width: 0, height: 0 },
-    textShadowRadius: 18,
-  },
-  timerPaused: {
-    color: '#FBBF24',
-    textShadowColor: 'rgba(251,191,36,0.45)',
-    textShadowOffset: { width: 0, height: 0 },
-    textShadowRadius: 18,
+  timerRecording: { color: '#FFFFFF' },
+  timerPaused: { color: MUTED_TEXT },
+
+  previewBox: {
+    marginTop: 14, borderRadius: 22, padding: 12,
+    backgroundColor: GLASS, borderWidth: 1, borderColor: GLASS_BORDER,
   },
 
-  previewBox: { width: '100%', marginBottom: 16 },
-
-  // Transcript
   transcriptBox: {
-    backgroundColor: 'rgba(113,101,248,0.16)',
-    borderRadius: DS.radius.lg,
-    padding: 18,
-    marginBottom: 16,
-    borderWidth: 1,
-    borderColor: 'rgba(155,140,255,0.36)',
+    marginTop: 14, borderRadius: 22, padding: 18,
+    backgroundColor: 'rgba(255,255,255,0.96)',
   },
-  transcriptHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: 12,
-  },
-  inlineLabel: { flexDirection: 'row', alignItems: 'center', gap: 8 },
-  transcriptLabel: { color: DARK_TEXT, fontSize: DS.font.sm, fontWeight: '800' },
-  copyBtn: {
-    backgroundColor: ACCENT,
-    borderRadius: DS.radius.xs,
-    paddingHorizontal: 14,
-    paddingVertical: 7,
-  },
-  copyBtnText: { color: '#FFF', fontSize: DS.font.xs, fontWeight: '800' },
-  transcriptText: { color: '#E0DEFF', fontSize: DS.font.bodyMd, lineHeight: 26 },
+  transcriptHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10 },
+  inlineLabel: { flexDirection: 'row', alignItems: 'center', gap: 8, flexShrink: 1 },
+  transcriptLabel: { color: DS.colors.ink, fontSize: 12, fontWeight: '800', letterSpacing: 1.2, textTransform: 'uppercase' },
+  copyBtn: { backgroundColor: DS.colors.ink, borderRadius: 999, paddingHorizontal: 14, paddingVertical: 7 },
+  copyBtnText: { color: DS.colors.white, fontSize: 12, fontWeight: '700' },
+  transcriptText: { color: DS.colors.ink, fontSize: 16, lineHeight: 25 },
 
   transcribingBox: {
-    backgroundColor: 'rgba(255,255,255,0.07)',
-    borderRadius: DS.radius.lg,
-    padding: 22,
-    marginBottom: 16,
-    alignItems: 'center',
+    marginTop: 14, borderRadius: 22, padding: 18, alignItems: 'center',
+    backgroundColor: GLASS, borderWidth: 1, borderColor: GLASS_BORDER,
   },
-  progressIcon: { width: 38, height: 38, borderRadius: 19, backgroundColor: DS.colors.primaryLight, alignItems: 'center', justifyContent: 'center', marginBottom: 10 },
-  transcribingText: {
-    color: DARK_TEXT,
-    fontSize: DS.font.bodyMd,
-    fontWeight: '700',
-    textAlign: 'center',
-    lineHeight: 26,
+  progressIcon: {
+    width: 44, height: 44, borderRadius: 22, backgroundColor: 'rgba(139,128,255,0.18)',
+    alignItems: 'center', justifyContent: 'center', marginBottom: 10,
   },
-  transcribingNote: { color: MUTED_TEXT, fontSize: DS.font.xs, fontWeight: '400' },
+  transcribingText: { color: DARK_TEXT, fontSize: 16, fontWeight: '700', textAlign: 'center', lineHeight: 23 },
+  transcribingNote: { color: MUTED_TEXT, fontSize: 13, fontWeight: '500' },
+  bgContinueBtn: {
+    flexDirection: 'row', alignItems: 'center', gap: 6,
+    marginTop: 14, paddingVertical: 10, paddingHorizontal: 16,
+    backgroundColor: 'rgba(255,255,255,0.10)', borderRadius: 999,
+  },
+  bgContinueBtnText: { color: DARK_TEXT, fontSize: 13, fontWeight: '700' },
 
   errorBox: {
-    backgroundColor: 'rgba(228,91,114,0.12)',
-    borderRadius: DS.radius.lg,
-    padding: 18,
-    marginBottom: 16,
-    borderWidth: 1,
-    borderColor: 'rgba(228,91,114,0.32)',
+    marginTop: 14, borderRadius: 20, padding: 16,
+    backgroundColor: 'rgba(224,71,95,0.14)', borderWidth: 1, borderColor: 'rgba(224,71,95,0.35)',
   },
-  errorText: { color: '#EF5472', fontSize: DS.font.sm, lineHeight: 22 },
+  errorText: { color: '#FFC2CB', fontSize: 14, lineHeight: 20, fontWeight: '600', flexShrink: 1 },
+  signInToRetryBtn: {
+    marginTop: 12, backgroundColor: DS.colors.white, borderRadius: 14, height: 44,
+    alignItems: 'center', justifyContent: 'center',
+  },
+  signInToRetryBtnText: { color: DS.colors.ink, fontSize: 14, fontWeight: '800' },
 
-  // Controls
-  controls: { alignItems: 'center', marginTop: 8 },
-
-  idleControls: { alignItems: 'center', width: '100%' },
-
-  recordButtonWrapper: {
-    alignItems: 'center',
-    justifyContent: 'center',
-    position: 'relative',
-    width: 140,
-    height: 140,
-    marginBottom: 10,
-  },
-  langSelectorWrapper: {
-    width: '100%',
-    marginBottom: 24,
-  },
-  langSelectorLabel: {
-    color: MUTED_TEXT,
-    fontSize: DS.font.xxs,
-    fontWeight: '700',
-    textTransform: 'uppercase',
-    letterSpacing: 1,
-    marginBottom: 10,
-    textAlign: 'center',
-  },
-  langScrollContainer: {
-    gap: 8,
-    paddingHorizontal: 4,
-  },
-  langChip: {
-    backgroundColor: 'rgba(255,255,255,0.08)',
-    borderRadius: DS.radius.full,
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.15)',
-    paddingHorizontal: 12,
-    paddingVertical: 7,
-  },
-  langChipActive: {
-    backgroundColor: ACCENT,
-    borderColor: ACCENT,
-  },
-  langChipText: {
-    color: MUTED_TEXT,
-    fontSize: DS.font.xs,
-    fontWeight: '600',
-  },
-  langChipTextActive: {
-    color: '#FFFFFF',
-    fontWeight: '800',
-  },
-  pulseRing: {
-    position: 'absolute',
-    width: 120,
-    height: 120,
-    borderRadius: 60,
-    backgroundColor: 'rgba(239, 84, 114, 0.38)',
-  },
-  recordButton: {
-    width: 86,
-    height: 86,
-    borderRadius: 43,
-    backgroundColor: '#FFF',
-    alignItems: 'center',
-    justifyContent: 'center',
-    borderWidth: 8,
-    borderColor: 'rgba(155,140,255,0.36)',
-    zIndex: 10,
-  },
-  recordDot: { width: 31, height: 31, borderRadius: 16, backgroundColor: '#EF5472' },
-  stopSquare: { width: 27, height: 27, borderRadius: 6, backgroundColor: '#EF5472' },
-  hint: {
-    color: MUTED_TEXT,
-    fontSize: DS.font.xs,
-    textAlign: 'center',
-    marginTop: 14,
-    marginBottom: 8,
-  },
-
-  dividerRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 12,
-    marginVertical: 22,
-    width: '100%',
-  },
-  dividerLine: { flex: 1, height: 1, backgroundColor: 'rgba(255,255,255,0.12)' },
-  dividerText: { color: MUTED_TEXT, fontSize: DS.font.xs, fontWeight: '600' },
-
-  uploadBtn: {
-    width: '100%',
-    backgroundColor: 'rgba(255,255,255,0.08)',
-    borderRadius: DS.radius.md,
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.18)',
-    paddingVertical: 18,
-    paddingHorizontal: 20,
-    alignItems: 'center',
-    gap: 6,
-  },
-  uploadTitle: { flexDirection: 'row', alignItems: 'center', gap: 8 },
-  uploadBtnText: {
-    color: DARK_TEXT,
-    fontSize: DS.font.h3,
-    fontWeight: '800',
-  },
-  uploadBtnSub: {
-    color: MUTED_TEXT,
-    fontSize: DS.font.xxs,
-  },
-
-  postActions: { width: '100%', alignItems: 'center', gap: 12 },
-  openNoteBtn: {
-    width: '100%',
-    paddingVertical: 16,
-    borderRadius: DS.radius.md,
-    backgroundColor: ACCENT,
-    alignItems: 'center',
-    ...DS.shadow.primary,
-  },
-  openNoteBtnText: { color: '#FFF', fontSize: DS.font.h3, fontWeight: '800' },
-  discardBtn: { paddingVertical: 10, paddingHorizontal: 20 },
-  discardBtnText: { color: MUTED_TEXT, fontSize: DS.font.sm, fontWeight: '600' },
-
-  activeRecordingControls: {
-    width: '100%',
-    alignItems: 'center',
-  },
-  pauseResumeBtn: {
-    backgroundColor: 'rgba(255,255,255,0.12)',
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.22)',
-    borderRadius: DS.radius.full,
-    paddingHorizontal: 22,
-    paddingVertical: 12,
-    marginTop: 8,
-  },
-  pauseResumeBtnText: {
-    color: '#FFFFFF',
-    fontSize: DS.font.sm,
-    fontWeight: '800',
-  },
+  controls: { marginTop: 10 },
+  idleControls: { alignItems: 'center' },
+  activeRecordingControls: { alignItems: 'center', paddingTop: 6 },
 
   authNoticeCard: {
-    width: '100%',
-    backgroundColor: 'rgba(251,191,36,0.12)',
-    borderWidth: 1,
-    borderColor: 'rgba(251,191,36,0.3)',
-    borderRadius: DS.radius.md,
-    padding: 14,
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginBottom: 20,
-    gap: 12,
+    width: '100%', flexDirection: 'row', alignItems: 'center', gap: 12,
+    borderRadius: 18, padding: 14, marginBottom: 18,
+    backgroundColor: GLASS, borderWidth: 1, borderColor: GLASS_BORDER,
   },
-  authNoticeIcon: { fontSize: 22 },
   authNoticeContent: { flex: 1 },
-  authNoticeTitle: { color: '#FDE68A', fontSize: DS.font.xs, fontWeight: '800' },
-  authNoticeSub: { color: '#E2E8F0', fontSize: DS.font.xxs, marginTop: 2, lineHeight: 15 },
-  authNoticeBtn: {
-    backgroundColor: '#F59E0B',
-    borderRadius: DS.radius.xs,
-    paddingHorizontal: 12,
-    paddingVertical: 7,
-  },
-  authNoticeBtnText: { color: '#000000', fontSize: DS.font.xs, fontWeight: '800' },
+  authNoticeTitle: { color: DARK_TEXT, fontSize: 14, fontWeight: '700' },
+  authNoticeSub: { color: MUTED_TEXT, fontSize: 12.5, lineHeight: 17, marginTop: 2 },
+  authNoticeBtn: { backgroundColor: DS.colors.white, borderRadius: 999, paddingHorizontal: 14, paddingVertical: 8 },
+  authNoticeBtnText: { color: DS.colors.ink, fontSize: 12.5, fontWeight: '800' },
 
-  signInToRetryBtn: {
-    backgroundColor: DS.colors.primary,
-    borderRadius: DS.radius.md,
-    paddingVertical: 12,
-    paddingHorizontal: 18,
-    alignItems: 'center',
-    marginTop: 10,
-    ...DS.shadow.primary,
+  langSelectorWrapper: { width: '100%', marginBottom: 26 },
+  langSelectorLabel: { color: MUTED_TEXT, fontSize: 11.5, fontWeight: '700', letterSpacing: 1.3, textTransform: 'uppercase', marginBottom: 10, textAlign: 'center' },
+  langScrollContainer: { gap: 8, paddingHorizontal: 2 },
+  langChip: {
+    paddingHorizontal: 14, height: 36, borderRadius: 18, justifyContent: 'center',
+    backgroundColor: GLASS, borderWidth: 1, borderColor: GLASS_BORDER,
   },
-  signInToRetryBtnText: {
-    color: '#FFFFFF',
-    fontSize: DS.font.sm,
-    fontWeight: '800',
-  },
+  langChipActive: { backgroundColor: DS.colors.white, borderColor: DS.colors.white },
+  langChipText: { color: 'rgba(255,255,255,0.78)', fontSize: 13, fontWeight: '600' },
+  langChipTextActive: { color: DS.colors.ink, fontWeight: '700' },
 
-  bgContinueBtn: {
-    marginTop: 12,
-    paddingVertical: 10,
-    paddingHorizontal: 16,
-    backgroundColor: 'rgba(255,255,255,0.1)',
-    borderRadius: DS.radius.full,
+  recordButtonWrapper: { width: 150, height: 150, alignItems: 'center', justifyContent: 'center' },
+  pulseRing: {
+    position: 'absolute', width: 132, height: 132, borderRadius: 66,
+    backgroundColor: DS.colors.orange,
   },
-  bgContinueBtnText: {
-    color: '#E0DEFF',
-    fontSize: DS.font.xs,
-    fontWeight: '700',
+  recordButton: {
+    width: 96, height: 96, borderRadius: 48,
+    backgroundColor: DS.colors.orange,
+    alignItems: 'center', justifyContent: 'center',
+    borderWidth: 5, borderColor: 'rgba(255,255,255,0.18)',
+    ...DS.shadow.record,
   },
+  hint: { color: MUTED_TEXT, fontSize: 14, fontWeight: '600', marginTop: 10, textAlign: 'center' },
+  recordErrorText: { color: MUTED_TEXT, fontSize: 11, lineHeight: 15, marginTop: 8, textAlign: 'center', opacity: 0.85, paddingHorizontal: 12 },
 
-  pressed: { opacity: 0.82, transform: [{ scale: 0.97 }] },
+  dividerRow: { width: '100%', flexDirection: 'row', alignItems: 'center', gap: 12, marginVertical: 22 },
+  dividerLine: { flex: 1, height: 1, backgroundColor: GLASS_BORDER },
+  dividerText: { color: MUTED_TEXT, fontSize: 12, fontWeight: '700', letterSpacing: 1, textTransform: 'uppercase' },
+
+  uploadBtn: {
+    width: '100%', borderRadius: 20, paddingVertical: 16, paddingHorizontal: 18, alignItems: 'center',
+    backgroundColor: GLASS, borderWidth: 1, borderColor: GLASS_BORDER, borderStyle: 'dashed',
+  },
+  uploadTitle: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  uploadBtnText: { color: DARK_TEXT, fontSize: 15, fontWeight: '700' },
+  uploadBtnSub: { color: MUTED_TEXT, fontSize: 12, marginTop: 4, letterSpacing: 0.4 },
+  shareTip: { color: MUTED_TEXT, fontSize: 12, marginTop: 12, textAlign: 'center', lineHeight: 17, paddingHorizontal: 12 },
+
+  pauseResumeBtn: {
+    marginTop: 18, height: 48, paddingHorizontal: 26, borderRadius: 999, justifyContent: 'center',
+    backgroundColor: 'rgba(255,255,255,0.10)', borderWidth: 1, borderColor: GLASS_BORDER,
+  },
+  pauseResumeBtnText: { color: DARK_TEXT, fontSize: 15, fontWeight: '700' },
+
+  postActions: { marginTop: 18, gap: 10 },
+  openNoteBtn: {
+    height: 54, borderRadius: 18, backgroundColor: DS.colors.white,
+    alignItems: 'center', justifyContent: 'center',
+  },
+  openNoteBtnText: { color: DS.colors.ink, fontSize: 16, fontWeight: '800' },
+  discardBtn: { height: 46, alignItems: 'center', justifyContent: 'center' },
+  discardBtnText: { color: MUTED_TEXT, fontSize: 14, fontWeight: '600' },
+
+  pressed: { opacity: 0.88, transform: [{ scale: 0.96 }] },
 });

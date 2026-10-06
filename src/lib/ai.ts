@@ -1,6 +1,7 @@
 import { Platform } from 'react-native';
 import { TRANSCRIPTION_API_URL, toFriendlyErrorMessage } from '@/lib/utils';
 import { getAuthHeaders } from '@/lib/supabase';
+import { ensureServerAwake } from '@/lib/transcription';
 
 export type SummaryResult = {
   summary: string;
@@ -19,6 +20,7 @@ export async function generateAISummary(transcript: string): Promise<SummaryResu
   const summaryKey = `summary-${clean.length}-${clean.slice(0, 32)}`;
 
   const attempt = async () => {
+    await ensureServerAwake();
     const authHeaders = await getAuthHeaders();
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), 90_000);
@@ -88,6 +90,7 @@ export async function transcribeImage(base64Image: string, mimeType = 'image/jpe
   const ocrKey = `ocr-${clean.length}-${clean.slice(0, 32)}`;
 
   const attempt = async () => {
+    await ensureServerAwake();
     const authHeaders = await getAuthHeaders();
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), 90_000);

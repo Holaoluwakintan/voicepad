@@ -1,8 +1,8 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Platform, StyleSheet, View } from 'react-native';
 import { useEffect, useState } from 'react';
-
-const TERMS_KEY = '@voicepad/terms_accepted_v1';
+import { CONSENT_STORAGE_KEY as TERMS_KEY } from '@/constants/legal';
+import { whenAdsAllowed } from '@/lib/admob-init';
 
 /**
  * AdMobBanner
@@ -15,7 +15,12 @@ export function AdMobBanner() {
   const [consented, setConsented] = useState(false);
 
   useEffect(() => {
-    AsyncStorage.getItem(TERMS_KEY).then((value) => setConsented(value === 'true'));
+    let alive = true;
+    // Show ads only after the user accepted the terms AND Google's consent check (UMP) allows it.
+    Promise.all([AsyncStorage.getItem(TERMS_KEY), whenAdsAllowed()])
+      .then(([value, allowed]) => { if (alive) setConsented(value === 'true' && allowed); })
+      .catch(() => {});
+    return () => { alive = false; };
   }, []);
 
   if (Platform.OS === 'web' || !consented) return null;

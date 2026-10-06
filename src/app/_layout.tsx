@@ -1,30 +1,35 @@
-import { DarkTheme, DefaultTheme, Stack, ThemeProvider } from 'expo-router';
+import { DefaultTheme, Stack, ThemeProvider } from 'expo-router';
+import { useFonts } from 'expo-font';
+import { StatusBar } from 'expo-status-bar';
 import * as SplashScreen from 'expo-splash-screen';
-import { Alert, Platform, useColorScheme } from 'react-native';
+import { Alert, Platform } from 'react-native';
 
 import { useEffect } from 'react';
 import { AnimatedSplashOverlay } from '@/components/animated-icon';
 import { ConsentModal } from '@/components/consent-modal';
+import { AutoSync } from '@/components/auto-sync';
 import { AuthProvider } from '@/lib/auth';
 import { wakeUpTranscriptionServer } from '@/lib/transcription';
 import { hasStorageRecovery, restoreNotesFromBackup } from '@/lib/notes';
+import { DS } from '@/constants/design';
+import { initAdMob } from '@/lib/admob-init';
+
+const VoicePadTheme = {
+  ...DefaultTheme,
+  colors: { ...DefaultTheme.colors, background: DS.colors.canvas, card: DS.colors.surface, primary: DS.colors.primary, text: DS.colors.ink, border: DS.colors.border },
+};
 
 SplashScreen.preventAutoHideAsync();
 
-/** Initialise AdMob once at startup on native builds, safely. */
-function initAdMob() {
-  if (Platform.OS === 'web') return;
-  try {
-    // eslint-disable-next-line @typescript-eslint/no-require-imports
-    const ads = require('react-native-google-mobile-ads');
-    ads.default().initialize().catch(() => {});
-  } catch {
-    // react-native-google-mobile-ads not linked (Expo Go / web) — ignore
-  }
-}
+// Deep links (e.g. audio shared in from WhatsApp) open on top of the tabs, so Back returns to the app.
+export const unstable_settings = { initialRouteName: '(tabs)' };
 
 export default function RootLayout() {
-  const colorScheme = useColorScheme();
+  // The display serif is a nice-to-have: if it fails to load, text falls back to the system font.
+  useFonts({
+    InstrumentSerif: require('../../assets/fonts/InstrumentSerif-Regular.ttf'),
+    'InstrumentSerif-Italic': require('../../assets/fonts/InstrumentSerif-Italic.ttf'),
+  });
 
   useEffect(() => {
     // Pre-warm the cloud transcription server immediately on app launch
@@ -52,12 +57,15 @@ export default function RootLayout() {
 
   return (
     <AuthProvider>
-      <ThemeProvider value={colorScheme === 'dark' ? DarkTheme : DefaultTheme}>
+      <ThemeProvider value={VoicePadTheme}>
+        <StatusBar style="dark" />
         <AnimatedSplashOverlay />
         <ConsentModal />
-        <Stack screenOptions={{ headerShown: false }}>
+        <AutoSync />
+        <Stack screenOptions={{ headerShown: false, contentStyle: { backgroundColor: DS.colors.canvas }, animation: 'slide_from_right' }}>
           <Stack.Screen name="(tabs)" />
-          <Stack.Screen name="note/record" />
+          <Stack.Screen name="share" options={{ animation: 'none' }} />
+          <Stack.Screen name="note/record" options={{ animation: 'slide_from_bottom', contentStyle: { backgroundColor: DS.colors.night } }} />
           <Stack.Screen name="note/[id]" />
           <Stack.Screen name="privacy" />
           <Stack.Screen name="terms" />

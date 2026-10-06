@@ -1,4 +1,3 @@
-import { Platform } from 'react-native';
 import { supabase } from './supabase';
 
 export const AUDIO_BUCKET = 'voicepad-audio';
@@ -6,57 +5,12 @@ export const AUDIO_BUCKET = 'voicepad-audio';
 const signedUrlCache = new Map<string, { url: string; expiresAt: number }>();
 
 /**
- * Uploads a local audio recording to Supabase Storage.
- * Stores audio in a private bucket under `${userId}/${noteId}.<ext>`.
+ * Privacy (v1.1.3): VoicePad no longer uploads audio to cloud storage. Recordings stay on
+ * the device that made them, and only text syncs. The helpers below exist only for notes
+ * created before v1.1.3 that may still reference an older cloud file (audio_path):
+ * playing it if it is still there (returns null gracefully when it is not) and removing it
+ * when the user deletes the note.
  */
-export async function uploadAudioToCloud(
-  userId: string,
-  noteId: string,
-  localUri: string
-): Promise<string | null> {
-  if (!supabase || !userId || !localUri) return null;
-
-  try {
-    const isWeb = Platform.OS === 'web';
-    const ext = isWeb ? 'webm' : 'm4a';
-    const contentType = isWeb ? 'audio/webm' : 'audio/mp4';
-    const filePath = `${userId}/${noteId}.${ext}`;
-
-    let body: Blob | ArrayBuffer;
-
-    if (isWeb) {
-      const response = await fetch(localUri);
-      body = await response.blob();
-    } else {
-      // Use standard fetch blob or ArrayBuffer for native file URI
-      try {
-        const { File } = await import('expo-file-system');
-        const file = new File(localUri);
-        body = await file.arrayBuffer();
-      } catch {
-        const response = await fetch(localUri);
-        body = await response.blob();
-      }
-    }
-
-    const { error } = await supabase.storage
-      .from(AUDIO_BUCKET)
-      .upload(filePath, body, {
-        contentType,
-        upsert: true,
-      });
-
-    if (error) {
-      console.warn('Storage upload error:', error.message);
-      return null;
-    }
-
-    return filePath;
-  } catch (err) {
-    console.warn('Audio cloud upload failed (offline or unconfigured):', err);
-    return null;
-  }
-}
 
 /**
  * Generates a secure, temporary signed URL (1 hour) for streaming/playing a remote voice note.
@@ -102,5 +56,33 @@ export async function deleteAudioFromCloud(audioPath?: string): Promise<boolean>
     return !error;
   } catch {
     return false;
+  }
+}
+
+/**
+ * Account deletion: removes every file in the signed-in user's own folder of the legacy
+ * audio bucket (pre-1.1.3 backups). Storage policies only let a user list/delete their own
+ * folder. Best effort: returns the number of files removed and never throws.
+ */
+export async function deleteAllCloudAudioForCurrentUser(): Promise<number> {
+  if (!supabase) return 0;
+  try {
+    const { data: userData } = await supabase.auth.getUser();
+    const userId = userData?.user?.id;
+    if (!userId) return 0;
+    let removed = 0;
+    for (let round = 0; round < 20; round += 1) {
+      const { data: files, error } = await supabase.storage.from(AUDIO_BUCKET).list(userId, { limit: 100 });
+      if (error || !files || files.length === 0) break;
+      const paths = files.filter((f) => f.name).map((f) => `${userId}/${f.name}`);
+      if (paths.length === 0) break;
+      const { error: removeError } = await supabase.storage.from(AUDIO_BUCKET).remove(paths);
+      if (removeError) break;
+      removed += paths.length;
+      paths.forEach((p) => signedUrlCache.delete(p));
+    }
+    return removed;
+  } catch {
+    return 0;
   }
 }

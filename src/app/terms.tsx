@@ -10,7 +10,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
 import { DS } from '@/constants/design';
-import { TERMS_OF_SERVICE } from '@/constants/legal';
+import { LEGAL_CONTACT_EMAIL, TERMS_OF_SERVICE } from '@/constants/legal';
 
 export default function TermsScreen() {
   const router = useRouter();
@@ -38,13 +38,19 @@ export default function TermsScreen() {
           {TERMS_OF_SERVICE.sections.map((section) => (
             <View key={section.id} style={styles.card}>
               <ThemedText style={styles.sectionTitle}>{section.title}</ThemedText>
-              <ThemedText style={styles.sectionBody}>{section.content}</ThemedText>
+              {section.link === 'privacy' ? (
+                <Pressable onPress={() => router.push('/privacy')} accessibilityRole="link" accessibilityLabel="Open Privacy Policy">
+                  <ThemedText style={[styles.sectionBody, styles.linkText]}>{section.content}</ThemedText>
+                </Pressable>
+              ) : (
+                <ThemedText style={styles.sectionBody}>{section.content}</ThemedText>
+              )}
             </View>
           ))}
 
           <View style={styles.footer}>
             <ThemedText style={styles.footerText}>
-              VoicePad is engineered with a local-first commitment. Direct inquiries to support@voicepad.app.
+              Questions about these terms: {LEGAL_CONTACT_EMAIL}
             </ThemedText>
           </View>
         </ScrollView>
@@ -82,6 +88,7 @@ const styles = StyleSheet.create({
   },
   sectionTitle: { color: DS.colors.ink, fontSize: DS.font.bodyMd, fontWeight: '800', marginBottom: 8 },
   sectionBody: { color: DS.colors.ink, fontSize: DS.font.sm, lineHeight: 23 },
+  linkText: { color: DS.colors.primary, fontWeight: '700', textDecorationLine: 'underline' },
   footer: { paddingVertical: 20, alignItems: 'center' },
   footerText: { color: DS.colors.subtle, fontSize: DS.font.caption, textAlign: 'center' },
 });

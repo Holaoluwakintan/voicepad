@@ -305,7 +305,7 @@ export async function saveNotes(notes: Note[]): Promise<void> {
   });
 }
 
-export async function insertNote(note: Note): Promise<Note> {
+async function insertNoteInner(note: Note): Promise<Note> {
   if (Platform.OS === 'web') {
     return enqueueWeb(async () => {
       const all = await loadNotesWeb(true);
@@ -335,7 +335,7 @@ export async function insertNote(note: Note): Promise<Note> {
   return withTimestamps;
 }
 
-export async function updateNote(id: string, patch: Partial<Note>): Promise<Note | null> {
+async function updateNoteInner(id: string, patch: Partial<Note>): Promise<Note | null> {
   if (Platform.OS === 'web') {
     return enqueueWeb(async () => {
       const all = await loadNotesWeb(true);
@@ -387,7 +387,7 @@ export async function deleteLocalAudio(uri?: string | null): Promise<void> {
   }
 }
 
-export async function removeNote(id: string): Promise<void> {
+async function removeNoteInner(id: string): Promise<void> {
   if (Platform.OS === 'web') {
     return enqueueWeb(async () => {
       const all = await loadNotesWeb(true);
@@ -407,7 +407,7 @@ export async function removeNote(id: string): Promise<void> {
   );
 }
 
-export async function purgeNote(id: string): Promise<void> {
+async function purgeNoteInner(id: string): Promise<void> {
   if (Platform.OS === 'web') {
     return enqueueWeb(async () => {
       const all = await loadNotesWeb(true);
@@ -420,4 +420,63 @@ export async function purgeNote(id: string): Promise<void> {
     await deleteLocalAudio(row.audio_uri);
   }
   await db.runAsync('DELETE FROM notes WHERE id=?', id);
+}
+
+// ─── Change notifications (drives automatic cloud sync) ──────────────────────
+type NotesChangeListener = () => void;
+const changeListeners = new Set<NotesChangeListener>();
+/** Subscribe to user-made note changes (insert/update/delete). Not fired by sync writes. */
+export function onNotesChanged(listener: NotesChangeListener): () => void {
+  changeListeners.add(listener);
+  return () => { changeListeners.delete(listener); };
+}
+function notifyNotesChanged() {
+  for (const listener of changeListeners) {
+    try { listener(); } catch {}
+  }
+}
+
+const PURGED_IDS_KEY = '@voicepad/purged_note_ids';
+/** Ids permanently deleted on this device whose cloud rows still need deleting. */
+export async function getPendingPurges(): Promise<string[]> {
+  try {
+    const raw = await AsyncStorage.getItem(PURGED_IDS_KEY);
+    const ids = raw ? JSON.parse(raw) : [];
+    return Array.isArray(ids) ? ids.filter((x) => typeof x === 'string') : [];
+  } catch {
+    return [];
+  }
+}
+export async function clearPendingPurges(ids: string[]): Promise<void> {
+  const current = await getPendingPurges();
+  const next = current.filter((id) => !ids.includes(id));
+  await AsyncStorage.setItem(PURGED_IDS_KEY, JSON.stringify(next)).catch(() => {});
+}
+async function addPendingPurge(id: string): Promise<void> {
+  const current = await getPendingPurges();
+  if (!current.includes(id)) current.push(id);
+  await AsyncStorage.setItem(PURGED_IDS_KEY, JSON.stringify(current.slice(-500))).catch(() => {});
+}
+
+export async function insertNote(note: Note): Promise<Note> {
+  const saved = await insertNoteInner(note);
+  notifyNotesChanged();
+  return saved;
+}
+
+export async function updateNote(id: string, patch: Partial<Note>): Promise<Note | null> {
+  const saved = await updateNoteInner(id, patch);
+  if (saved) notifyNotesChanged();
+  return saved;
+}
+
+export async function removeNote(id: string): Promise<void> {
+  await removeNoteInner(id);
+  notifyNotesChanged();
+}
+
+export async function purgeNote(id: string): Promise<void> {
+  await purgeNoteInner(id);
+  await addPendingPurge(id);
+  notifyNotesChanged();
 }

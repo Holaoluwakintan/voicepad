@@ -1,7 +1,8 @@
 /**
- * Home Screen — Voice notes feed with premium glass card design.
+ * Home — the VoicePad studio: a midnight hero with quick capture, search,
+ * filters and the live feed of voice notes.
  */
-import { useCallback, useMemo, useState } from 'react';
+import { ReactNode, useCallback, useEffect, useMemo, useState } from 'react';
 import {
   Alert,
   FlatList,
@@ -16,21 +17,56 @@ import {
   View,
 } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
+import { onSyncFinished } from '@/lib/sync';
 import { useFocusEffect, useRouter } from 'expo-router';
 import * as Haptics from 'expo-haptics';
-import Animated, { FadeInDown } from 'react-native-reanimated';
-import { Camera, FilePenLine, Mic, Pencil, Search, Sparkles, Trash2, X } from 'lucide-react-native';
+import Animated, { FadeIn, FadeInDown } from 'react-native-reanimated';
+import {
+  AlertTriangle,
+  Camera,
+  Clock3,
+  Mic,
+  PenLine,
+  Pencil,
+  Pin,
+  RotateCcw,
+  Search,
+  Sparkles,
+  Trash2,
+  X,
+} from 'lucide-react-native';
 
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
+import { AuroraBackdrop, PressableScale } from '@/components/premium-ui';
 import { loadNotes, insertNote, removeNote, Note, NoteCategory, formatDuration } from '@/lib/notes';
 import { deleteAudioFromCloud } from '@/lib/storage';
 import { AdMobBanner } from '@/components/admob-banner';
 import { useAuth } from '@/lib/auth';
-import { DS } from '@/constants/design';
+import { DS, displayType } from '@/constants/design';
 import { formatNoteDate, generateNoteId } from '@/lib/utils';
 
 const categories: ('All' | NoteCategory)[] = ['All', 'Lectures', 'Sermons', 'Meetings', 'Personal'];
+
+function greetingFor(date: Date) {
+  const h = date.getHours();
+  if (h < 5) return 'Good night';
+  if (h < 12) return 'Good morning';
+  if (h < 17) return 'Good afternoon';
+  return 'Good evening';
+}
+
+function cleanPreview(item: Note) {
+  if (item.summary) {
+    return item.summary
+      .replace(/^#+[^\n]*\n/gm, '')
+      .replace(/[*_`#>]|\[ \]|\[x\]/g, '')
+      .replace(/\s+/g, ' ')
+      .trim()
+      .slice(0, 170);
+  }
+  return item.content?.trim() || 'Voice note';
+}
 
 // ─── Note Card ────────────────────────────────────────────────────────────────
 
@@ -51,95 +87,101 @@ function NoteCard({
   const isPending = item.transcriptionStatus === 'pending';
   const isFailed = item.transcriptionStatus === 'failed';
   const hasAudio = Boolean(item.audioUri || item.audioPath);
-
-  const preview = isPending
-    ? '⏳ Transcribing your voice note…'
-    : isFailed
-    ? `⚠️ ${item.transcriptionError || 'Tap to retry transcription.'}`
-    : item.summary
-    ? item.summary.replace(/^###[^\n]+\n/gm, '').replace(/\*\*/g, '').slice(0, 160)
-    : item.content || 'Audio voice note';
-
   const wordCount = item.content?.trim() ? item.content.trim().split(/\s+/).length : 0;
 
   return (
-    <Animated.View entering={FadeInDown.duration(280).delay(Math.min(index * 40, 220))}>
-      <Pressable
+    <Animated.View entering={FadeInDown.duration(260).delay(Math.min(index * 35, 210))}>
+      <PressableScale
         onPress={onPress}
         onLongPress={onLongPress}
-        style={({ pressed }) => [styles.noteCard, pressed && styles.pressed]}
+        style={styles.noteCard}
         accessibilityRole="button"
         accessibilityLabel={`Note: ${item.title || 'Untitled'}. Category: ${item.category ?? 'Personal'}. ${isFailed ? 'Transcription failed' : isPending ? 'Transcribing' : 'Ready'}`}
         accessibilityHint="Double tap to open note details, press and hold for actions"
       >
-        {/* Category left accent bar */}
-        <View style={[styles.cardAccent, { backgroundColor: catData.accent }]} />
-
-        <View style={styles.cardBody}>
-          {/* Top row: category pill + duration */}
-          <View style={styles.cardTopRow}>
-            <View style={[styles.categoryPill, { backgroundColor: catData.badgeBg, borderColor: catData.border }]}>
-              <ThemedText style={styles.categoryIcon}>{catData.icon}</ThemedText>
-              <ThemedText style={[styles.categoryPillText, { color: catData.badgeText }]}>
-                {item.category ?? 'Personal'}
-              </ThemedText>
-            </View>
-            <View style={styles.cardMeta}>
-              {isPending && <View style={[styles.statusDot, { backgroundColor: '#FBBF24' }]} />}
-              {isFailed && <View style={[styles.statusDot, { backgroundColor: DS.colors.danger }]} />}
-              {!isPending && !isFailed && hasAudio && (
-                <View style={styles.durationBadge}>
-                  <ThemedText style={styles.durationText}>
-                    ⏱ {formatDuration(item.durationSeconds)}
-                  </ThemedText>
-                </View>
-              )}
-              {item.pinned && <ThemedText style={styles.pinStar}>★</ThemedText>}
-            </View>
-          </View>
-
-          {/* Title */}
-          <ThemedText style={styles.cardTitle} numberOfLines={1}>{item.title}</ThemedText>
-
-          {/* Preview */}
-          <ThemedText
-            style={[
-              styles.cardPreview,
-              isPending && styles.cardPreviewPending,
-              isFailed && styles.cardPreviewFailed,
-            ]}
-            numberOfLines={2}
-          >
-            {preview}
+        <View style={styles.cardTopRow}>
+          <View style={[styles.categoryDot, { backgroundColor: catData.accent }]} />
+          <ThemedText style={[styles.categoryLabel, { color: catData.badgeText }]}>
+            {item.category ?? 'Personal'}
           </ThemedText>
+          <ThemedText style={styles.cardDate}>· {formatNoteDate(item.createdAt)}</ThemedText>
+          <View style={{ flex: 1 }} />
+          {item.pinned && <Pin size={13} color={DS.colors.primary} strokeWidth={2.4} />}
+        </View>
 
-          {/* Inline retry chip for failed transcriptions */}
-          {isFailed && (
+        <ThemedText style={styles.cardTitle} numberOfLines={1}>{item.title || 'Untitled note'}</ThemedText>
+
+        {isPending ? (
+          <View style={styles.statusRow}>
+            <View style={styles.pulseDot} />
+            <ThemedText style={styles.cardPending}>Transcribing your voice note…</ThemedText>
+          </View>
+        ) : isFailed ? (
+          <View style={styles.failBox}>
+            <AlertTriangle size={15} color={DS.colors.danger} strokeWidth={2.2} />
+            <ThemedText style={styles.cardFailed} numberOfLines={2}>
+              {item.transcriptionError || 'Transcription failed.'}
+            </ThemedText>
             <Pressable
               onPress={(e) => { e.stopPropagation?.(); onRetry(); }}
               style={styles.retryChip}
               accessibilityLabel="Retry transcription"
               accessibilityRole="button"
+              hitSlop={8}
             >
-              <ThemedText style={styles.retryChipText}>↻ Retry</ThemedText>
+              <RotateCcw size={13} color={DS.colors.white} strokeWidth={2.6} />
+              <ThemedText style={styles.retryChipText}>Retry</ThemedText>
             </Pressable>
-          )}
-
-          {/* Bottom row */}
-          <View style={styles.cardBottomRow}>
-            <ThemedText style={styles.cardDate}>{formatNoteDate(item.createdAt)}</ThemedText>
-            {wordCount > 0 && (
-              <ThemedText style={styles.cardWordCount}>{wordCount} words</ThemedText>
-            )}
-            {item.summary && (
-              <View style={styles.aiPill}>
-                <ThemedText style={styles.aiPillText}>✨ AI Summary</ThemedText>
-              </View>
-            )}
           </View>
+        ) : (
+          <ThemedText style={styles.cardPreview} numberOfLines={2}>{cleanPreview(item)}</ThemedText>
+        )}
+
+        <View style={styles.cardBottomRow}>
+          {hasAudio && (
+            <View style={styles.metaChip}>
+              <Clock3 size={12} color={DS.colors.muted} strokeWidth={2.2} />
+              <ThemedText style={styles.metaChipText}>{formatDuration(item.durationSeconds)}</ThemedText>
+            </View>
+          )}
+          {wordCount > 0 && (
+            <View style={styles.metaChip}>
+              <ThemedText style={styles.metaChipText}>{wordCount.toLocaleString()} words</ThemedText>
+            </View>
+          )}
+          {item.summary && (
+            <View style={[styles.metaChip, styles.aiChip]}>
+              <Sparkles size={12} color={DS.colors.primary} strokeWidth={2.4} />
+              <ThemedText style={[styles.metaChipText, { color: DS.colors.primary }]}>AI summary</ThemedText>
+            </View>
+          )}
         </View>
-      </Pressable>
+      </PressableScale>
     </Animated.View>
+  );
+}
+
+function SectionHeader({ label, count }: { label: string; count: number }) {
+  return (
+    <View style={styles.sectionHeader}>
+      <ThemedText style={styles.sectionTitle}>{label}</ThemedText>
+      <ThemedText style={styles.sectionCount}>{count}</ThemedText>
+      <View style={styles.sectionRule} />
+    </View>
+  );
+}
+
+function QuickAction({ icon, label, tone, onPress }: { icon: ReactNode; label: string; tone: 'record' | 'glass'; onPress: () => void }) {
+  return (
+    <PressableScale
+      onPress={() => { Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {}); onPress(); }}
+      style={[styles.quickAction, tone === 'record' ? styles.quickRecord : styles.quickGlass]}
+      accessibilityRole="button"
+      accessibilityLabel={label}
+    >
+      {icon}
+      <ThemedText style={styles.quickLabel}>{label}</ThemedText>
+    </PressableScale>
   );
 }
 
@@ -162,8 +204,11 @@ export default function HomeScreen() {
 
   const userName =
     user?.user_metadata?.full_name ||
-    (user?.email ? user.email.split('@')[0] : 'VoicePad User');
-  const userInitial = (userName[0] || 'V').toUpperCase();
+    (user?.email ? user.email.split('@')[0] : '');
+  const firstName = userName ? String(userName).split(' ')[0] : '';
+  const userInitial = ((userName || 'V')[0] || 'V').toUpperCase();
+  const greeting = greetingFor(new Date());
+  const recordCategory = selectedCategory === 'All' ? 'Personal' : selectedCategory;
 
   const fetchNotes = useCallback(async () => {
     try {
@@ -178,6 +223,7 @@ export default function HomeScreen() {
   }, []);
 
   useFocusEffect(useCallback(() => { fetchNotes(); }, [fetchNotes]));
+  useEffect(() => onSyncFinished((r) => { if (r.ok && (r.pulled ?? 0) > 0) fetchNotes(); }), [fetchNotes]);
 
   const onRefresh = useCallback(() => { setIsRefreshing(true); fetchNotes(); }, [fetchNotes]);
 
@@ -257,26 +303,18 @@ export default function HomeScreen() {
     router.push(`/note/${note.id}`);
   }
 
-  function SectionHeader({ label, count }: { label: string; count: number }) {
-    return (
-      <View style={styles.sectionHeader}>
-        <ThemedText style={styles.sectionTitle}>{label}</ThemedText>
-        <View style={styles.sectionBadge}>
-          <ThemedText style={styles.sectionBadgeText}>{count}</ThemedText>
-        </View>
-      </View>
-    );
-  }
-
   return (
     <ThemedView style={styles.container}>
-      <SafeAreaView style={styles.safeArea}>
+      <SafeAreaView style={styles.safeArea} edges={['top', 'left', 'right']}>
         <FlatList
           data={[...pinnedNotes, ...recentNotes]}
           keyExtractor={(item) => item.id}
           refreshControl={
-            <RefreshControl refreshing={isRefreshing} onRefresh={onRefresh} tintColor={DS.colors.primary} />
+            <RefreshControl refreshing={isRefreshing} onRefresh={onRefresh} tintColor={DS.colors.primary} colors={[DS.colors.primary]} />
           }
+          initialNumToRender={8}
+          windowSize={7}
+          removeClippedSubviews={Platform.OS === 'android'}
           renderItem={({ item, index }) => (
             <>
               {index === 0 && pinnedNotes.length > 0 && (
@@ -298,60 +336,75 @@ export default function HomeScreen() {
           contentContainerStyle={styles.listContent}
           ListHeaderComponent={
             <>
-              {/* ─── Hero header ─── */}
-              <View style={styles.heroCard}>
-                <View style={styles.heroRow}>
-                  <View style={styles.avatar}>
-                    <ThemedText style={styles.avatarText}>{userInitial}</ThemedText>
-                  </View>
-                  <View style={styles.greetingBlock}>
-                    <ThemedText style={styles.greetingSmall}>Welcome back</ThemedText>
-                    <ThemedText style={styles.greetingName} numberOfLines={1}>{userName}</ThemedText>
-                  </View>
-                  <Pressable
-                    onPress={() => router.push('/notes')}
-                    style={styles.notepadBtn}
-                    accessibilityLabel="Open Notepad"
-                  >
-                    <FilePenLine size={15} color={DS.colors.primary} strokeWidth={2.4} /><ThemedText style={styles.notepadBtnText}>Notepad</ThemedText>
-                  </Pressable>
+              {/* ─── Top bar ─── */}
+              <View style={styles.topBar}>
+                <View style={styles.brandMark}>
+                  <View style={styles.brandDot} />
+                  <ThemedText style={styles.brandText}>VoicePad</ThemedText>
                 </View>
-
-                {/* Stats bar */}
-                <View style={styles.statsRow}>
-                  <View style={styles.statItem}>
-                    <ThemedText style={styles.statValue}>{notes.length}</ThemedText>
-                    <ThemedText style={styles.statLabel}>Total</ThemedText>
-                  </View>
-                  <View style={styles.statDivider} />
-                  <View style={styles.statItem}>
-                    <ThemedText style={styles.statValue}>{voiceCount}</ThemedText>
-                    <ThemedText style={styles.statLabel}>Voice</ThemedText>
-                  </View>
-                  <View style={styles.statDivider} />
-                  <View style={styles.statItem}>
-                    <ThemedText style={styles.statValue}>{aiCount}</ThemedText>
-                    <ThemedText style={styles.statLabel}>AI Summaries</ThemedText>
-                  </View>
-                </View>
+                <Pressable
+                  onPress={() => router.push('/profile')}
+                  style={styles.avatar}
+                  accessibilityRole="button"
+                  accessibilityLabel="Open profile"
+                >
+                  <ThemedText style={styles.avatarText}>{userInitial}</ThemedText>
+                </Pressable>
               </View>
+
+              {/* ─── Hero ─── */}
+              <Animated.View entering={FadeIn.duration(420)} style={styles.heroCard}>
+                <AuroraBackdrop />
+                <ThemedText style={styles.heroEyebrow}>{greeting}{firstName ? ',' : ''}</ThemedText>
+                <ThemedText style={styles.heroTitle} numberOfLines={2}>
+                  {firstName ? firstName : 'What will you'}
+                  {firstName ? '' : ' '}
+                  {firstName ? null : <ThemedText style={styles.heroTitleItalic}>capture?</ThemedText>}
+                </ThemedText>
+                <ThemedText style={styles.heroSub}>
+                  {notes.length === 0
+                    ? 'Record a lecture, sermon or meeting. VoicePad writes it down and sums it up.'
+                    : `${notes.length} note${notes.length === 1 ? '' : 's'} · ${voiceCount} voice · ${aiCount} AI summar${aiCount === 1 ? 'y' : 'ies'}`}
+                </ThemedText>
+
+                <View style={styles.quickRow}>
+                  <QuickAction
+                    tone="record"
+                    label="Record"
+                    icon={<Mic size={20} color={DS.colors.white} strokeWidth={2.4} />}
+                    onPress={() => router.push({ pathname: '/note/record', params: { category: recordCategory } })}
+                  />
+                  <QuickAction
+                    tone="glass"
+                    label="Scan"
+                    icon={<Camera size={20} color={DS.colors.white} strokeWidth={2.2} />}
+                    onPress={() => router.push('/scan')}
+                  />
+                  <QuickAction
+                    tone="glass"
+                    label="Write"
+                    icon={<PenLine size={20} color={DS.colors.white} strokeWidth={2.2} />}
+                    onPress={() => setIsComposerOpen(true)}
+                  />
+                </View>
+              </Animated.View>
 
               <AdMobBanner />
 
               {/* Search */}
               <View style={styles.searchBox}>
-                <Search size={19} color={DS.colors.subtle} strokeWidth={2.2} />
+                <Search size={18} color={DS.colors.subtle} strokeWidth={2.2} />
                 <TextInput
                   value={search}
                   onChangeText={setSearch}
-                  placeholder="Search notes or AI summaries…"
+                  placeholder="Search notes and summaries"
                   placeholderTextColor={DS.colors.subtle}
                   style={styles.searchInput}
                   returnKeyType="search"
                 />
                 {search.length > 0 && (
-                  <Pressable onPress={() => setSearch('')}>
-                    <X size={18} color={DS.colors.muted} strokeWidth={2.2} />
+                  <Pressable onPress={() => setSearch('')} hitSlop={10} accessibilityLabel="Clear search">
+                    <X size={17} color={DS.colors.muted} strokeWidth={2.2} />
                   </Pressable>
                 )}
               </View>
@@ -370,17 +423,15 @@ export default function HomeScreen() {
                     accessibilityLabel={mode === 'voice' ? `Show only voice notes, ${voiceCount} total` : `Show all notes, ${notes.length} total`}
                     style={[styles.toggleBtn, filterSource === mode && styles.toggleBtnActive]}
                   >
-                    <ThemedText
-                      style={[styles.toggleBtnText, filterSource === mode && styles.toggleBtnTextActive]}
-                    >
-                      {mode === 'voice' ? `Voice (${voiceCount})` : `All notes (${notes.length})`}
+                    <ThemedText style={[styles.toggleBtnText, filterSource === mode && styles.toggleBtnTextActive]}>
+                      {mode === 'voice' ? `Voice notes · ${voiceCount}` : `Everything · ${notes.length}`}
                     </ThemedText>
                   </Pressable>
                 ))}
               </View>
 
               {/* Category chips */}
-              <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.chipsRow}>
+              <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.chipsRow} style={styles.chipsScroll}>
                 {categories.map((cat) => {
                   const catData = cat !== 'All' ? DS.category[cat] : null;
                   const isActive = selectedCategory === cat;
@@ -391,78 +442,53 @@ export default function HomeScreen() {
                       accessibilityLabel={`Filter notes by ${cat}`}
                       accessibilityRole="button"
                       accessibilityState={{ selected: isActive }}
-                      style={[
-                        styles.chip,
-                        isActive && styles.chipActive,
-                        isActive && catData ? { backgroundColor: catData.accent, borderColor: catData.accent } : null,
-                      ]}
+                      style={[styles.chip, isActive && styles.chipActive]}
                     >
-                      <ThemedText style={[styles.chipText, isActive && styles.chipTextActive]}>
-                        {catData ? `${catData.icon} ` : ''}{cat}
-                      </ThemedText>
+                      {catData && <View style={[styles.chipDot, { backgroundColor: catData.accent }]} />}
+                      <ThemedText style={[styles.chipText, isActive && styles.chipTextActive]}>{cat}</ThemedText>
                     </Pressable>
                   );
                 })}
               </ScrollView>
 
               {isLoading && (
-                <ThemedText style={styles.loadingText}>Loading your notes…</ThemedText>
+                <View style={styles.skeletonWrap}>
+                  {[0, 1, 2].map((k) => <View key={k} style={styles.skeletonCard} />)}
+                </View>
               )}
 
               {!isLoading && filteredNotes.length === 0 && (
-                <View style={styles.emptyState}>
-                  <View style={styles.emptyIcon}><Mic size={30} color={DS.colors.primary} strokeWidth={2.2} /></View>
-                  <ThemedText style={styles.emptyTitle}>Start your first voice note</ThemedText>
+                <Animated.View entering={FadeInDown.duration(300)} style={styles.emptyState}>
+                  <View style={styles.emptyIcon}><Mic size={28} color={DS.colors.orange} strokeWidth={2.2} /></View>
+                  <ThemedText style={styles.emptyTitle}>{search || selectedCategory !== 'All' ? 'Nothing matches yet' : 'Your first note starts here'}</ThemedText>
                   <ThemedText style={styles.emptySubtitle}>
-                    Tap the mic below to record. VoicePad transcribes your audio and creates AI summaries automatically.
+                    {search || selectedCategory !== 'All'
+                      ? 'Try another search or category.'
+                      : 'Tap Record and talk. VoicePad transcribes it and writes an AI summary for you.'}
                   </ThemedText>
-                  <Pressable
-                    onPress={() => router.push({ pathname: '/note/record', params: { category: selectedCategory === 'All' ? 'Personal' : selectedCategory } })}
+                  <PressableScale
+                    onPress={() => router.push({ pathname: '/note/record', params: { category: recordCategory } })}
                     style={styles.emptyCta}
                     accessibilityRole="button"
                   >
-                    <Mic size={18} color={DS.colors.white} strokeWidth={2.5} /><ThemedText style={styles.emptyCtaText}>Record now</ThemedText>
+                    <Mic size={17} color={DS.colors.white} strokeWidth={2.5} />
+                    <ThemedText style={styles.emptyCtaText}>Start recording</ThemedText>
+                  </PressableScale>
+                  <Pressable onPress={() => router.push('/scan')} style={styles.emptyCtaSecondary} accessibilityRole="button">
+                    <Camera size={15} color={DS.colors.muted} strokeWidth={2.2} />
+                    <ThemedText style={styles.emptyCtaSecondaryText}>or scan a page</ThemedText>
                   </Pressable>
-                  <Pressable
-                    onPress={() => router.push('/scan')}
-                    style={styles.emptyCtaSecondary}
-                    accessibilityRole="button"
-                  >
-                    <Camera size={16} color={DS.colors.muted} strokeWidth={2.2} /><ThemedText style={styles.emptyCtaSecondaryText}>Or scan a photo</ThemedText>
-                  </Pressable>
-                </View>
+                </Animated.View>
               )}
             </>
           }
-          ListFooterComponent={<View style={{ height: Math.max(insets.bottom, 16) + 110 }} />}
+          ListFooterComponent={<View style={{ height: 28 }} />}
         />
-
-        {/* FAB */}
-        <Pressable
-          onPress={() => {
-            Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium).catch(() => {});
-            router.push({ pathname: '/note/record', params: { category: selectedCategory === 'All' ? 'Personal' : selectedCategory } });
-          }}
-          style={({ pressed }) => [
-            styles.fab,
-            { bottom: Math.max(insets.bottom, 16) + 24 },
-            pressed && styles.fabPressed,
-          ]}
-          accessibilityLabel="Record a voice note"
-          accessibilityRole="button"
-        >
-          <Mic size={28} color={DS.colors.white} strokeWidth={2.4} />
-        </Pressable>
 
         {/* Action tray (long-press) */}
         {selectedNote && (
-          <Animated.View
-            entering={FadeInDown.duration(200)}
-            style={[styles.actionTray, { bottom: Math.max(insets.bottom, 16) + 10 }]}
-          >
-            <View style={styles.trayThumb}>
-              <Sparkles size={19} color={DS.colors.primary} strokeWidth={2.2} />
-            </View>
+          <Animated.View entering={FadeInDown.duration(200)} style={[styles.actionTray, { bottom: 12 }]}>
+            <ThemedText style={styles.trayTitle} numberOfLines={1}>{selectedNote.title || 'Note'}</ThemedText>
             <Pressable
               onPress={() => {
                 router.push(`/note/${selectedNote.id}`);
@@ -472,7 +498,8 @@ export default function HomeScreen() {
               accessibilityRole="button"
               accessibilityLabel="Edit note"
             >
-              <Pencil size={15} color={DS.colors.ink} strokeWidth={2.2} /><ThemedText style={styles.trayBtnText}>Edit</ThemedText>
+              <Pencil size={15} color={DS.colors.white} strokeWidth={2.2} />
+              <ThemedText style={styles.trayBtnText}>Edit</ThemedText>
             </Pressable>
             <Pressable
               onPress={() => deleteNote(selectedNote)}
@@ -480,36 +507,24 @@ export default function HomeScreen() {
               accessibilityRole="button"
               accessibilityLabel="Delete note"
             >
-              <Trash2 size={15} color={DS.colors.danger} strokeWidth={2.2} /><ThemedText style={[styles.trayBtnText, { color: DS.colors.danger }]}>Delete</ThemedText>
+              <Trash2 size={15} color="#FF8A9B" strokeWidth={2.2} />
+              <ThemedText style={[styles.trayBtnText, { color: '#FF8A9B' }]}>Delete</ThemedText>
             </Pressable>
-            <Pressable
-              onPress={() => setSelectedNote(null)}
-              style={styles.trayBtnClose}
-              accessibilityRole="button"
-              accessibilityLabel="Close actions"
-            >
-              <X size={17} color={DS.colors.muted} strokeWidth={2.2} />
+            <Pressable onPress={() => setSelectedNote(null)} style={styles.trayBtnClose} accessibilityRole="button" accessibilityLabel="Close actions" hitSlop={8}>
+              <X size={17} color="rgba(255,255,255,0.7)" strokeWidth={2.2} />
             </Pressable>
           </Animated.View>
         )}
       </SafeAreaView>
 
-      {/* Quick text composer modal */}
-      <Modal
-        visible={isComposerOpen}
-        animationType="slide"
-        transparent
-        onRequestClose={() => setIsComposerOpen(false)}
-      >
-        <KeyboardAvoidingView
-          style={styles.modalBackdrop}
-          behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-        >
-          <View style={styles.composer}>
+      {/* Quick text composer */}
+      <Modal visible={isComposerOpen} animationType="slide" transparent onRequestClose={() => setIsComposerOpen(false)}>
+        <KeyboardAvoidingView style={styles.modalBackdrop} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
+          <View style={[styles.composer, { paddingBottom: Math.max(insets.bottom, 16) + 8 }]}>
             <View style={styles.composerHandle} />
             <View style={styles.composerHeader}>
-              <ThemedText style={styles.composerTitle}>New text note</ThemedText>
-              <Pressable onPress={() => setIsComposerOpen(false)}>
+              <ThemedText style={styles.composerTitle}>New note</ThemedText>
+              <Pressable onPress={() => setIsComposerOpen(false)} hitSlop={10} accessibilityLabel="Close">
                 <X size={20} color={DS.colors.muted} strokeWidth={2.2} />
               </Pressable>
             </View>
@@ -529,9 +544,9 @@ export default function HomeScreen() {
               multiline
               textAlignVertical="top"
             />
-            <Pressable onPress={createNote} style={styles.composerSaveBtn}>
+            <PressableScale onPress={createNote} style={styles.composerSaveBtn}>
               <ThemedText style={styles.composerSaveBtnText}>Save note</ThemedText>
-            </Pressable>
+            </PressableScale>
           </View>
         </KeyboardAvoidingView>
       </Modal>
@@ -542,307 +557,161 @@ export default function HomeScreen() {
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: DS.colors.canvas },
   safeArea: { flex: 1 },
-  listContent: {
-    width: '100%',
-    maxWidth: 760,
-    alignSelf: 'center',
-    paddingHorizontal: 20,
-    paddingTop: 20,
-  },
+  listContent: { width: '100%', maxWidth: 760, alignSelf: 'center', paddingHorizontal: 20, paddingTop: 8 },
 
-  // Hero card
+  topBar: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 14 },
+  brandMark: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  brandDot: { width: 10, height: 10, borderRadius: 5, backgroundColor: DS.colors.orange },
+  brandText: { color: DS.colors.ink, fontSize: 17, fontWeight: '800', letterSpacing: -0.3 },
+  avatar: {
+    width: 38, height: 38, borderRadius: 19, backgroundColor: DS.colors.ink,
+    alignItems: 'center', justifyContent: 'center',
+  },
+  avatarText: { color: DS.colors.white, fontSize: 15, fontWeight: '700' },
+
   heroCard: {
-    backgroundColor: DS.colors.ink,
     borderRadius: DS.radius.xl,
     padding: 22,
-    marginBottom: 16,
-    borderWidth: 1,
-    borderColor: DS.colors.inkSoft,
-    ...DS.shadow.elevated,
-  },
-  heroRow: { flexDirection: 'row', alignItems: 'center', marginBottom: 18 },
-  avatar: {
-    width: 50, height: 50, borderRadius: 25,
-    backgroundColor: DS.colors.primary,
-    borderWidth: 2, borderColor: DS.colors.accent,
-    alignItems: 'center', justifyContent: 'center',
-  },
-  avatarText: { color: DS.colors.white, fontSize: DS.font.h2, fontWeight: '800' },
-  greetingBlock: { flex: 1, marginLeft: 14 },
-  greetingSmall: { color: '#B7B7D2', fontSize: DS.font.xxs },
-  greetingName: { color: DS.colors.white, fontSize: DS.font.h3, fontWeight: '800', marginTop: 1 },
-  notepadBtn: {
-    flexDirection: 'row', alignItems: 'center', gap: 6,
-    backgroundColor: DS.colors.primaryLight,
-    borderRadius: DS.radius.sm,
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-  },
-  notepadBtnText: { color: DS.colors.primary, fontSize: DS.font.xxs, fontWeight: '800' },
-  statsRow: {
-    flexDirection: 'row',
-    backgroundColor: 'rgba(255,255,255,0.08)',
-    borderRadius: DS.radius.md,
-    padding: 14,
-    alignItems: 'center',
-  },
-  statItem: { flex: 1, alignItems: 'center' },
-  statValue: { color: '#B9B1FF', fontSize: DS.font.h1, fontWeight: '800' },
-  statLabel: { color: '#B7B7D2', fontSize: DS.font.caption, marginTop: 2, fontWeight: '600' },
-  statDivider: { width: 1, height: 30, backgroundColor: DS.colors.border },
-
-  // Search
-  searchBox: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: DS.colors.surface,
-    borderRadius: DS.radius.md,
-    borderWidth: 1,
-    borderColor: DS.colors.border,
-    paddingHorizontal: 16,
-    height: 52,
-    marginBottom: 12,
-    ...DS.shadow.card,
-  },
-  searchIcon: { color: DS.colors.subtle, fontSize: 22, marginRight: 10 },
-  searchInput: { flex: 1, color: DS.colors.ink, fontSize: DS.font.bodyMd },
-  searchClear: { color: DS.colors.muted, fontSize: 22, paddingHorizontal: 4 },
-
-  // Source toggle
-  sourceToggle: {
-    flexDirection: 'row',
-    backgroundColor: DS.colors.surfaceDim,
-    borderRadius: DS.radius.md,
-    borderWidth: 1,
-    borderColor: DS.colors.border,
-    padding: 4,
-    marginBottom: 12,
-    gap: 4,
-  },
-  toggleBtn: {
-    flex: 1, paddingVertical: 9,
-    borderRadius: DS.radius.sm,
-    alignItems: 'center',
-  },
-  toggleBtnActive: {
-    backgroundColor: DS.colors.surface,
-    ...DS.shadow.card,
-  },
-  toggleBtnText: { color: DS.colors.muted, fontSize: DS.font.xs, fontWeight: '700' },
-  toggleBtnTextActive: { color: DS.colors.ink, fontWeight: '800' },
-
-  // Category chips
-  chipsRow: { gap: 10, paddingVertical: 12 },
-  chip: {
-    backgroundColor: DS.colors.surface,
-    borderWidth: 1,
-    borderColor: DS.colors.border,
-    borderRadius: DS.radius.full,
-    paddingHorizontal: 16,
-    paddingVertical: 9,
-  },
-  chipActive: { backgroundColor: DS.colors.primary, borderColor: DS.colors.primary },
-  chipText: { color: DS.colors.muted, fontSize: DS.font.sm, fontWeight: '600' },
-  chipTextActive: { color: '#FFFFFF', fontWeight: '800' },
-
-  // Loading
-  loadingText: { color: DS.colors.muted, paddingVertical: 24 },
-
-  // Empty state
-  emptyState: {
-    backgroundColor: DS.colors.surface,
-    borderRadius: DS.radius.xl,
-    borderWidth: 1,
-    borderColor: DS.colors.border,
-    padding: 32,
-    alignItems: 'center',
-    marginTop: 14,
-    ...DS.shadow.card,
-  },
-  emptyIcon: { width: 62, height: 62, borderRadius: 31, backgroundColor: DS.colors.primaryLight, alignItems: 'center', justifyContent: 'center', marginBottom: 14 },
-  emptyTitle: { color: DS.colors.ink, fontSize: DS.font.h2, fontWeight: '800', textAlign: 'center' },
-  emptySubtitle: {
-    color: DS.colors.muted,
-    fontSize: DS.font.sm, lineHeight: 22,
-    textAlign: 'center', maxWidth: 320,
-    marginTop: 10,
-  },
-  emptyCta: {
-    flexDirection: 'row', gap: 8, alignItems: 'center',
-    backgroundColor: DS.colors.orange,
-    borderRadius: DS.radius.md,
-    paddingHorizontal: 24, paddingVertical: 14,
-    marginTop: 20,
-    ...DS.shadow.orange,
-  },
-  emptyCtaText: { color: '#FFFFFF', fontSize: DS.font.bodyMd, fontWeight: '800' },
-  emptyCtaSecondary: {
-    flexDirection: 'row', gap: 7, alignItems: 'center',
-    marginTop: 12,
-    paddingHorizontal: 20, paddingVertical: 10,
-  },
-  emptyCtaSecondaryText: { color: DS.colors.muted, fontSize: DS.font.sm, fontWeight: '700' },
-
-  // Section headers
-  sectionHeader: {
-    flexDirection: 'row', alignItems: 'center',
-    marginTop: 14, marginBottom: 10, gap: 8,
-  },
-  sectionTitle: { color: DS.colors.ink, fontSize: DS.font.h3, fontWeight: '800' },
-  sectionBadge: {
-    backgroundColor: DS.colors.primaryLight,
-    borderRadius: DS.radius.full,
-    paddingHorizontal: 9, paddingVertical: 3,
-  },
-  sectionBadgeText: { color: DS.colors.primary, fontSize: DS.font.xxs, fontWeight: '800' },
-
-  // Note cards (glass-style)
-  noteCard: {
-    flexDirection: 'row',
-    backgroundColor: DS.colors.surfaceGlass,
-    borderRadius: DS.radius.lg,
-    borderWidth: 1,
-    borderColor: DS.colors.border,
-    marginBottom: 12,
+    paddingTop: 24,
+    marginBottom: 18,
     overflow: 'hidden',
+    backgroundColor: DS.colors.night,
+    ...DS.shadow.floating,
+  },
+  heroEyebrow: { color: DS.colors.nightMuted, fontSize: 14, fontWeight: '600', letterSpacing: 0.2 },
+  heroTitle: { color: DS.colors.nightText, ...displayType(42), marginTop: 2 },
+  heroTitleItalic: { color: '#C9C2FF', ...displayType(42, true) },
+  heroSub: { color: DS.colors.nightMuted, fontSize: 14, lineHeight: 20, marginTop: 8, maxWidth: 320 },
+  quickRow: { flexDirection: 'row', gap: 10, marginTop: 20 },
+  quickAction: {
+    flex: 1, height: 74, borderRadius: 20, alignItems: 'center', justifyContent: 'center', gap: 6,
+  },
+  quickRecord: { backgroundColor: DS.colors.orange, ...DS.shadow.orange },
+  quickGlass: { backgroundColor: 'rgba(255,255,255,0.09)', borderWidth: 1, borderColor: 'rgba(255,255,255,0.10)' },
+  quickLabel: { color: DS.colors.white, fontSize: 13, fontWeight: '700', lineHeight: 16 },
+
+  searchBox: {
+    flexDirection: 'row', alignItems: 'center', gap: 10,
+    backgroundColor: DS.colors.surface, borderRadius: 16,
+    borderWidth: 1, borderColor: DS.colors.border,
+    paddingHorizontal: 15, height: 50, marginBottom: 12,
+  },
+  searchInput: { flex: 1, color: DS.colors.ink, fontSize: DS.font.bodyMd, paddingVertical: 0 },
+
+  sourceToggle: {
+    flexDirection: 'row', backgroundColor: DS.colors.surfaceSoft, borderRadius: 14,
+    padding: 4, marginBottom: 12, gap: 4,
+  },
+  toggleBtn: { flex: 1, paddingVertical: 9, borderRadius: 11, alignItems: 'center' },
+  toggleBtnActive: { backgroundColor: DS.colors.surface, ...DS.shadow.card },
+  toggleBtnText: { color: DS.colors.muted, fontSize: 13, fontWeight: '600' },
+  toggleBtnTextActive: { color: DS.colors.ink, fontWeight: '700' },
+
+  chipsScroll: { marginHorizontal: -20, marginBottom: 14 },
+  chipsRow: { gap: 8, paddingHorizontal: 20 },
+  chip: {
+    flexDirection: 'row', alignItems: 'center', gap: 7,
+    paddingHorizontal: 14, height: 36, borderRadius: 18,
+    backgroundColor: DS.colors.surface, borderWidth: 1, borderColor: DS.colors.border,
+  },
+  chipActive: { backgroundColor: DS.colors.ink, borderColor: DS.colors.ink },
+  chipDot: { width: 7, height: 7, borderRadius: 4 },
+  chipText: { color: DS.colors.inkSoft, fontSize: 13, fontWeight: '600' },
+  chipTextActive: { color: DS.colors.white },
+
+  sectionHeader: { flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 6, marginBottom: 10 },
+  sectionTitle: { color: DS.colors.ink, fontSize: 12, fontWeight: '800', letterSpacing: 1.3, textTransform: 'uppercase' },
+  sectionCount: { color: DS.colors.subtle, fontSize: 12, fontWeight: '700' },
+  sectionRule: { flex: 1, height: StyleSheet.hairlineWidth, backgroundColor: DS.colors.borderStrong },
+
+  noteCard: {
+    backgroundColor: DS.colors.surface,
+    borderRadius: 22,
+    padding: 16,
+    marginBottom: 10,
+    borderWidth: 1,
+    borderColor: DS.colors.border,
     ...DS.shadow.card,
   },
-  pressed: { opacity: 0.80, transform: [{ scale: 0.985 }] },
-  cardAccent: { width: 4, borderTopLeftRadius: DS.radius.lg, borderBottomLeftRadius: DS.radius.lg },
-  cardBody: { flex: 1, padding: 16 },
-  cardTopRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
-  categoryPill: {
-    flexDirection: 'row', alignItems: 'center',
-    borderRadius: DS.radius.xs, borderWidth: 1,
-    paddingHorizontal: 9, paddingVertical: 4, gap: 4,
+  cardTopRow: { flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 8 },
+  categoryDot: { width: 7, height: 7, borderRadius: 4 },
+  categoryLabel: { fontSize: 12, fontWeight: '700', letterSpacing: 0.2 },
+  cardDate: { color: DS.colors.subtle, fontSize: 12, fontWeight: '500' },
+  cardTitle: { color: DS.colors.ink, fontSize: 17, fontWeight: '700', letterSpacing: -0.2, marginBottom: 4 },
+  cardPreview: { color: DS.colors.muted, fontSize: 14, lineHeight: 20 },
+  statusRow: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingVertical: 2 },
+  pulseDot: { width: 8, height: 8, borderRadius: 4, backgroundColor: DS.colors.warning },
+  cardPending: { color: DS.colors.warning, fontSize: 14, fontWeight: '600' },
+  failBox: {
+    flexDirection: 'row', alignItems: 'center', gap: 8,
+    backgroundColor: DS.colors.dangerLight, borderRadius: 12, padding: 10, marginTop: 2,
   },
-  categoryIcon: { fontSize: DS.font.caption },
-  categoryPillText: { fontSize: DS.font.caption, fontWeight: '800' },
-  cardMeta: { flexDirection: 'row', alignItems: 'center', gap: 7 },
-  statusDot: { width: 8, height: 8, borderRadius: 4 },
-  durationBadge: {
-    backgroundColor: DS.colors.surfaceDim,
-    borderRadius: DS.radius.xs,
-    paddingHorizontal: 8, paddingVertical: 3,
+  cardFailed: { flex: 1, color: DS.colors.danger, fontSize: 13, lineHeight: 18, fontWeight: '600' },
+  retryChip: {
+    flexDirection: 'row', alignItems: 'center', gap: 5,
+    backgroundColor: DS.colors.danger, borderRadius: 999, paddingHorizontal: 11, paddingVertical: 6,
   },
-  durationText: { color: DS.colors.muted, fontSize: DS.font.caption, fontWeight: '700' },
-  pinStar: { color: '#F59E0B', fontSize: DS.font.body },
-  cardTitle: {
-    color: DS.colors.ink, fontSize: DS.font.bodyMd,
-    fontWeight: '800', marginTop: 12,
+  retryChipText: { color: DS.colors.white, fontSize: 12, fontWeight: '700' },
+  cardBottomRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginTop: 12 },
+  metaChip: {
+    flexDirection: 'row', alignItems: 'center', gap: 5,
+    backgroundColor: DS.colors.surfaceSoft, borderRadius: 999, paddingHorizontal: 9, paddingVertical: 4,
   },
-  cardPreview: {
-    color: DS.colors.muted, fontSize: DS.font.sm,
-    lineHeight: 20, marginTop: 6,
-  },
-  cardPreviewPending: { color: '#B45309' },
-  cardPreviewFailed: { color: DS.colors.danger },
-  cardBottomRow: {
-    flexDirection: 'row', alignItems: 'center',
-    gap: 12, marginTop: 14,
-  },
-  cardDate: { color: DS.colors.subtle, fontSize: DS.font.caption },
-  cardWordCount: { color: DS.colors.subtle, fontSize: DS.font.caption },
-  aiPill: {
-    backgroundColor: DS.colors.primaryLight,
-    borderRadius: DS.radius.xs,
-    paddingHorizontal: 8, paddingVertical: 2,
-  },
-  aiPillText: { color: DS.colors.primary, fontSize: DS.font.caption, fontWeight: '800' },
+  aiChip: { backgroundColor: DS.colors.primaryLight },
+  metaChipText: { color: DS.colors.muted, fontSize: 11.5, fontWeight: '600' },
 
-  // FAB
-  fab: {
-    position: 'absolute', alignSelf: 'center', bottom: 44,
-    width: 68, height: 68, borderRadius: 34,
-    backgroundColor: DS.colors.orange,
-    alignItems: 'center', justifyContent: 'center',
-    ...DS.shadow.orange,
-  },
-  fabPressed: { transform: [{ scale: 0.93 }], opacity: 0.9 },
-  fabText: { fontSize: 30 },
+  skeletonWrap: { gap: 10 },
+  skeletonCard: { height: 108, borderRadius: 22, backgroundColor: DS.colors.surfaceSoft },
 
-  // Action tray
+  emptyState: {
+    alignItems: 'center', paddingVertical: 34, paddingHorizontal: 24,
+    backgroundColor: DS.colors.surface, borderRadius: 26, borderWidth: 1, borderColor: DS.colors.border,
+  },
+  emptyIcon: {
+    width: 64, height: 64, borderRadius: 32, backgroundColor: '#FFEDE8',
+    alignItems: 'center', justifyContent: 'center', marginBottom: 14,
+  },
+  emptyTitle: { color: DS.colors.ink, ...displayType(28), textAlign: 'center' },
+  emptySubtitle: { color: DS.colors.muted, fontSize: 14, lineHeight: 21, textAlign: 'center', marginTop: 8, maxWidth: 300 },
+  emptyCta: {
+    flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 20,
+    backgroundColor: DS.colors.ink, borderRadius: 999, paddingHorizontal: 22, height: 48,
+  },
+  emptyCtaText: { color: DS.colors.white, fontSize: 15, fontWeight: '700' },
+  emptyCtaSecondary: { flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 14, padding: 6 },
+  emptyCtaSecondaryText: { color: DS.colors.muted, fontSize: 13, fontWeight: '600' },
+
   actionTray: {
-    position: 'absolute', left: 16, right: 16, bottom: 14,
-    backgroundColor: DS.colors.surface,
-    borderRadius: DS.radius.xl,
-    padding: 12,
-    flexDirection: 'row', alignItems: 'center',
-    ...DS.shadow.elevated,
+    position: 'absolute', left: 16, right: 16,
+    flexDirection: 'row', alignItems: 'center', gap: 8,
+    backgroundColor: DS.colors.night, borderRadius: 22, padding: 10, paddingLeft: 16,
+    ...DS.shadow.floating,
   },
-  trayThumb: {
-    width: 42, height: 42, borderRadius: DS.radius.sm,
-    backgroundColor: DS.colors.primaryLight,
-    alignItems: 'center', justifyContent: 'center',
-    marginRight: 6,
-  },
-  trayThumbText: { color: DS.colors.primary, fontSize: DS.font.body },
+  trayTitle: { flex: 1, color: DS.colors.white, fontSize: 14, fontWeight: '700' },
   trayBtn: {
     flexDirection: 'row', alignItems: 'center', gap: 6,
-    backgroundColor: DS.colors.surfaceDim,
-    borderRadius: DS.radius.sm,
-    paddingHorizontal: 14, paddingVertical: 10,
-    marginLeft: 6,
+    backgroundColor: 'rgba(255,255,255,0.10)', borderRadius: 14, paddingHorizontal: 12, height: 38,
   },
-  trayBtnDanger: { backgroundColor: DS.colors.dangerLight },
-  trayBtnText: { color: DS.colors.ink, fontSize: DS.font.sm, fontWeight: '800' },
-  trayBtnClose: {
-    marginLeft: 'auto' as any,
-    width: 34, height: 34,
-    borderRadius: DS.radius.full,
-    backgroundColor: DS.colors.surfaceDim,
+  trayBtnDanger: { backgroundColor: 'rgba(224,71,95,0.16)' },
+  trayBtnText: { color: DS.colors.white, fontSize: 13, fontWeight: '700' },
+  trayBtnClose: { width: 34, height: 38, alignItems: 'center', justifyContent: 'center' },
+
+  modalBackdrop: { flex: 1, justifyContent: 'flex-end', backgroundColor: 'rgba(14,16,24,0.45)' },
+  composer: {
+    backgroundColor: DS.colors.surface, borderTopLeftRadius: 28, borderTopRightRadius: 28,
+    padding: 20, paddingTop: 10,
+  },
+  composerHandle: { alignSelf: 'center', width: 40, height: 5, borderRadius: 3, backgroundColor: DS.colors.borderStrong, marginBottom: 14 },
+  composerHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 },
+  composerTitle: { color: DS.colors.ink, ...displayType(28) },
+  composerTitleInput: {
+    color: DS.colors.ink, fontSize: 18, fontWeight: '700',
+    borderBottomWidth: 1, borderBottomColor: DS.colors.border, paddingVertical: 10, marginBottom: 10,
+  },
+  composerContentInput: { color: DS.colors.ink, fontSize: 16, lineHeight: 23, minHeight: 150, paddingVertical: 6 },
+  composerSaveBtn: {
+    marginTop: 14, backgroundColor: DS.colors.ink, borderRadius: 16, height: 52,
     alignItems: 'center', justifyContent: 'center',
   },
-  trayBtnCloseText: { color: DS.colors.muted, fontSize: 22, lineHeight: 24 },
-
-  // Composer modal
-  modalBackdrop: {
-    flex: 1, justifyContent: 'flex-end',
-    backgroundColor: 'rgba(23,21,42,0.38)',
-  },
-  composer: {
-    backgroundColor: DS.colors.surface,
-    borderTopLeftRadius: DS.radius.xl, borderTopRightRadius: DS.radius.xl,
-    padding: 24, minHeight: 400,
-  },
-  composerHandle: {
-    width: 40, height: 4, borderRadius: 2,
-    backgroundColor: DS.colors.border,
-    alignSelf: 'center', marginBottom: 18,
-  },
-  composerHeader: {
-    flexDirection: 'row', justifyContent: 'space-between',
-    alignItems: 'center', marginBottom: 18,
-  },
-  composerTitle: { color: DS.colors.ink, fontSize: DS.font.h2, fontWeight: '800' },
-  composerClose: { color: DS.colors.muted, fontSize: 30, lineHeight: 30 },
-  composerTitleInput: {
-    color: DS.colors.ink, fontSize: DS.font.h3, fontWeight: '700',
-    borderBottomWidth: 1, borderBottomColor: DS.colors.border, paddingVertical: 10,
-  },
-  composerContentInput: {
-    color: DS.colors.ink, fontSize: DS.font.bodyMd, lineHeight: 24,
-    minHeight: 140, paddingTop: 14,
-  },
-  composerSaveBtn: {
-    backgroundColor: DS.colors.primary, borderRadius: DS.radius.md,
-    alignItems: 'center', paddingVertical: 15, marginTop: 18,
-    ...DS.shadow.primary,
-  },
-  composerSaveBtnText: { color: '#FFFFFF', fontSize: DS.font.bodyMd, fontWeight: '800' },
-  retryChip: {
-    alignSelf: 'flex-start',
-    marginTop: 8,
-    backgroundColor: DS.colors.dangerLight,
-    borderWidth: 1,
-    borderColor: '#FCA5A5',
-    borderRadius: DS.radius.full,
-    paddingHorizontal: 12,
-    paddingVertical: 5,
-  },
-  retryChipText: {
-    color: DS.colors.danger,
-    fontSize: DS.font.caption,
-    fontWeight: '800',
-  },
+  composerSaveBtnText: { color: DS.colors.white, fontSize: 16, fontWeight: '700' },
 });

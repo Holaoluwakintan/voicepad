@@ -10,7 +10,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
 import { DS } from '@/constants/design';
-import { PRIVACY_POLICY } from '@/constants/legal';
+import { LEGAL_CONTACT_EMAIL, PRIVACY_POLICY } from '@/constants/legal';
 
 export default function PrivacyScreen() {
   const router = useRouter();
@@ -44,7 +44,7 @@ export default function PrivacyScreen() {
 
           <View style={styles.footer}>
             <ThemedText style={styles.footerText}>
-              VoicePad is engineered with a local-first commitment. Direct inquiries to privacy@voicepad.app.
+              Privacy questions or requests: {LEGAL_CONTACT_EMAIL}
             </ThemedText>
           </View>
         </ScrollView>

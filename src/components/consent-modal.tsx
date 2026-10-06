@@ -18,19 +18,26 @@ import * as Haptics from 'expo-haptics';
 import { ThemedText } from './themed-text';
 import { LegalModal } from './legal-modal';
 import { DS } from '@/constants/design';
+import { CONSENT_STORAGE_KEY, CONSENT_VERSION } from '@/constants/legal';
 
-const CONSENT_STORAGE_KEY = '@voicepad/terms_accepted_v1';
+// Earlier consent keys: a user who accepted one of these sees an "updated policy" title.
+const PREVIOUS_CONSENT_KEYS = Array.from({ length: CONSENT_VERSION - 1 }, (_, i) => `@voicepad/terms_accepted_v${i + 1}`);
 
 export function ConsentModal() {
   const [visible, setVisible] = useState(false);
   const [legalDoc, setLegalDoc] = useState<'terms' | 'privacy' | null>(null);
+  const [isUpdate, setIsUpdate] = useState(false);
 
   useEffect(() => {
-    AsyncStorage.getItem(CONSENT_STORAGE_KEY).then((value) => {
+    AsyncStorage.getItem(CONSENT_STORAGE_KEY).then(async (value) => {
       if (value !== 'true') {
+        try {
+          const previous = await AsyncStorage.multiGet(PREVIOUS_CONSENT_KEYS);
+          setIsUpdate(previous.some(([, v]) => v === 'true'));
+        } catch {}
         setVisible(true);
       }
-    });
+    }).catch(() => setVisible(true));
   }, []);
 
   async function handleAccept() {
@@ -52,18 +59,20 @@ export function ConsentModal() {
               <ThemedText style={styles.badgeText}>🎙️ PRIVACY & CONSENT</ThemedText>
             </View>
 
-            <ThemedText style={styles.title}>Welcome to VoicePad</ThemedText>
+            <ThemedText style={styles.title}>{isUpdate ? 'We updated our Privacy Policy' : 'Welcome to VoicePad'}</ThemedText>
             <ThemedText style={styles.subtitle}>
-              Your intelligent, local-first voice note companion. Before getting started, please review our privacy and consent guidelines.
+              {isUpdate
+                ? 'Your recordings now stay only on your phone, and only text syncs. Please review how VoicePad works with your data.'
+                : 'Your voice notes companion. Before you start, here is how VoicePad works with your data.'}
             </ThemedText>
 
             <ScrollView style={styles.scroll} showsVerticalScrollIndicator={false}>
               <View style={styles.itemRow}>
                 <ThemedText style={styles.itemIcon}>🔒</ThemedText>
                 <View style={styles.itemTextCol}>
-                  <ThemedText style={styles.itemTitle}>Local-First & Private</ThemedText>
+                  <ThemedText style={styles.itemTitle}>Your Data</ThemedText>
                   <ThemedText style={styles.itemDesc}>
-                    Your notes and voice files stay securely on your device. Nothing is shared or used to train public AI models.
+                    Recordings stay on your device. Your audio is never stored on our servers or cloud. If you sign in, only your text (notes, transcripts, summaries) is backed up to your private account. We never sell your data.
                   </ThemedText>
                 </View>
               </View>
@@ -73,7 +82,7 @@ export function ConsentModal() {
                 <View style={styles.itemTextCol}>
                   <ThemedText style={styles.itemTitle}>Recording Consent</ThemedText>
                   <ThemedText style={styles.itemDesc}>
-                    In compliance with multi-party consent laws, you agree to obtain authorization from speakers before recording conversations.
+                    You agree to get permission from the people you record and to follow the recording laws where you are.
                   </ThemedText>
                 </View>
               </View>
@@ -83,7 +92,7 @@ export function ConsentModal() {
                 <View style={styles.itemTextCol}>
                   <ThemedText style={styles.itemTitle}>AI-Assisted Features</ThemedText>
                   <ThemedText style={styles.itemDesc}>
-                    Transcriptions and summaries are generated via Groq Whisper and Llama over encrypted TLS connections.
+                    To transcribe, audio is sent securely (HTTPS) to our server and AI providers, processed, then deleted straight away. Free with Google AdMob banner ads.
                   </ThemedText>
                 </View>
               </View>

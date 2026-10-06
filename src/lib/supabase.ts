@@ -26,7 +26,12 @@ export const supabase = isSupabaseConfigured
         storage: Platform.OS === 'web' ? webStorage : AsyncStorage,
         autoRefreshToken: true,
         persistSession: true,
-        detectSessionInUrl: false,
+        // On web, let supabase-js pick the ?code= up from the page URL itself.
+        detectSessionInUrl: Platform.OS === 'web',
+        // PKCE makes Supabase return ?code= to the app's deep link, which we exchange
+        // for a session. Without it (implicit flow) tokens arrive in the #fragment
+        // and the native callback never saw them, so Google sign-in silently failed.
+        flowType: 'pkce',
       },
     })
   : null;

@@ -70,7 +70,7 @@ for each row execute function public.set_updated_at();
 
 -- ==============================================================================
 -- 2. Supabase Storage: 'voicepad-audio' Bucket
--- Execute the following in your Supabase SQL Editor to enable audio file uploads:
+-- Legacy bucket (pre-1.1.3 recordings only). No new audio is uploaded.
 -- ==============================================================================
 
 -- Create private bucket for voice recordings (if not already created in dashboard)
@@ -78,13 +78,11 @@ insert into storage.buckets (id, name, public)
 values ('voicepad-audio', 'voicepad-audio', false)
 on conflict (id) do nothing;
 
--- Storage RLS: Users can only upload, read, and delete within their own folder: ${auth.uid()}/*
+-- Storage RLS. Since v1.1.3 VoicePad stores NO audio in the cloud (text sync only),
+-- so there is no INSERT or UPDATE policy: uploads are refused. Users can still read and
+-- delete legacy files in their own folder ${auth.uid()}/* (note delete, account delete).
 drop policy if exists "Users can upload their own audio" on storage.objects;
-create policy "Users can upload their own audio" on storage.objects
-  for insert with check (
-    bucket_id = 'voicepad-audio'
-    and auth.uid()::text = (storage.foldername(name))[1]
-  );
+drop policy if exists "Users can update their own audio" on storage.objects;
 
 drop policy if exists "Users can read their own audio" on storage.objects;
 create policy "Users can read their own audio" on storage.objects
@@ -93,16 +91,9 @@ create policy "Users can read their own audio" on storage.objects
     and auth.uid()::text = (storage.foldername(name))[1]
   );
 
-drop policy if exists "Users can update their own audio" on storage.objects;
-create policy "Users can update their own audio" on storage.objects
-  for update using (
-    bucket_id = 'voicepad-audio'
-    and auth.uid()::text = (storage.foldername(name))[1]
-  );
-
 drop policy if exists "Users can delete their own audio" on storage.objects;
 create policy "Users can delete their own audio" on storage.objects
-  for delete using (
+  for delete to authenticated using (
     bucket_id = 'voicepad-audio'
     and auth.uid()::text = (storage.foldername(name))[1]
   );
