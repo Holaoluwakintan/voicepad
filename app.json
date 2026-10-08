@@ -2,7 +2,7 @@
   "expo": {
     "name": "VoicePad",
     "slug": "voicepad",
-    "version": "1.1.5",
+    "version": "1.1.6",
     "description": "Private AI voice notes, transcription, summaries, and photo-to-text capture for ideas that should not get lost.",
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
@@ -41,7 +41,7 @@
         "android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK"
       ],
       "predictiveBackGestureEnabled": false,
-      "versionCode": 9,
+      "versionCode": 10,
       "blockedPermissions": [
         "android.permission.SYSTEM_ALERT_WINDOW"
       ]

@@ -742,7 +742,7 @@ export default function RecordScreen() {
                     <View style={styles.authNoticeContent}>
                       <ThemedText style={styles.authNoticeTitle}>Guest Mode</ThemedText>
                       <ThemedText style={styles.authNoticeSub}>
-                        Sign in for unlimited transcription and cloud sync. Guests get a few free notes a day.
+                        Sign in for free cloud sync and more transcription. Guests get a few free notes a day.
                       </ThemedText>
                     </View>
                     <Pressable
