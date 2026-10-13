@@ -70,3 +70,21 @@ test('web preview guest audio over 25MB is capped with upgrade prompt', async ()
   assert.match(response.body.error, /10 minutes/i);
 });
 
+
+test('mobile guest: failed requests are refunded, never using up the daily allowance', async () => {
+  for (let i = 0; i < 6; i++) {
+    const response = await request(app)
+      .post('/summarize')
+      .set('X-Client-Type', 'mobile')
+      .set('Idempotency-Key', `guest-refund-${i}`)
+      .send({ text: '' });
+    assert.equal(response.status, 400, `attempt ${i}`);
+  }
+});
+
+test('mobile guest: requests to other features are still accepted after summaries were tried', async () => {
+  const ocr = await request(app).post('/ocr').set('X-Client-Type', 'mobile').set('Idempotency-Key', 'guest-ocr-0').send();
+  assert.notEqual(ocr.status, 429);
+  const tr = await request(app).post('/transcribe').set('X-Client-Type', 'mobile').set('Idempotency-Key', 'guest-tr-0').send();
+  assert.notEqual(tr.status, 429);
+});

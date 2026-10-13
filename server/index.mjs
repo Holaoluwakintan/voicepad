@@ -50,6 +50,10 @@ setInterval(() => {
     if (fresh.length === 0) webGuestUsage.delete(ip);
     else webGuestUsage.set(ip, fresh);
   }
+  for (const [key, entry] of mobileGuestUsage.entries()) {
+    entry.timestamps = entry.timestamps.filter((t) => t > cutoff);
+    if (entry.timestamps.length === 0) mobileGuestUsage.delete(key);
+  }
 }, 60 * 60_000).unref?.();
 
 function isMobileGuestLimited(ip, requestKey) {
@@ -68,10 +72,20 @@ function isMobileGuestLimited(ip, requestKey) {
     mobileGuestUsage.set(ip, current);
     return true;
   }
-  current.timestamps.push(Date.now());
-  if (requestKey) current.requestKeys.set(requestKey, Date.now());
+  const now = Date.now();
+  current.timestamps.push(now);
+  if (requestKey) current.requestKeys.set(requestKey, now);
   mobileGuestUsage.set(ip, current);
   return false;
+}
+
+function refundMobileGuest(key, requestKey) {
+  const current = mobileGuestUsage.get(key);
+  if (!current) return;
+  const at = requestKey ? current.requestKeys.get(requestKey) : undefined;
+  if (requestKey) current.requestKeys.delete(requestKey);
+  const i = at !== undefined ? current.timestamps.lastIndexOf(at) : current.timestamps.length - 1;
+  if (i >= 0) current.timestamps.splice(i, 1);
 }
 
 function isWebGuestLimited(ip) {
@@ -266,10 +280,16 @@ async function authMiddleware(req, res, next) {
 
   const isMobileGuest = clientType === 'mobile' && !req.user;
   if (isMobileGuest) {
+    // Each AI feature has its own daily guest allowance (10 transcriptions, 10 summaries,
+    // 10 scans), so summarising a note never eats into the transcriptions the app promises.
+    // A request that fails (no speech, provider down, bad input) is refunded.
+    const feature = req.path === '/summarize' ? 'summaries' : req.path === '/ocr' ? 'scans' : req.path === '/transcribe' ? 'transcriptions' : null;
+    if (!feature) { req.isMobileGuest = true; return next(); }
+    const quotaKey = `${req.clientIp}|${feature}`;
     const requestKey = `${req.path}:${String(req.headers['idempotency-key'] || req.body?.noteId || '').trim()}`;
-    if (isMobileGuestLimited(req.clientIp, requestKey)) {
+    if (isMobileGuestLimited(quotaKey, requestKey)) {
       return res.status(429).json({
-        error: 'Your free guest transcriptions are used up for today. Sign in to continue using VoicePad AI.',
+        error: `You have used today's ${MOBILE_GUEST_DAILY_LIMIT} free guest ${feature}. Sign in (it's free) to keep going, or try again tomorrow.`,
         guestLimitReached: true,
         signInRequired: true,
         dailyLimit: MOBILE_GUEST_DAILY_LIMIT,
@@ -277,6 +297,9 @@ async function authMiddleware(req, res, next) {
       });
     }
     req.isMobileGuest = true;
+    res.on('finish', () => {
+      if (res.statusCode >= 400 && res.statusCode !== 429) refundMobileGuest(quotaKey, requestKey);
+    });
     return next();
   }
 
