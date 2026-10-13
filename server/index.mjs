@@ -398,6 +398,73 @@ const geminiModels = getApiKeyList(
 );
 const groqVisionModels = getApiKeyList(process.env.GROQ_VISION_MODELS, 'qwen/qwen3.8-27b');
 
+// ─── Silence / noise hallucination guard ─────────────────────────────────────
+// Whisper models invent stock phrases ("Thank you.", "Thank you for watching!",
+// "you", ".") when a recording has no speech (mic covered, phone in a pocket,
+// pure background noise). Tested 2026-10-13: 8 s of silence -> "Thank you." on
+// whisper-large-v3-turbo. Those phrases must never be saved as a user's note.
+const HALLUCINATION_PHRASES = new Set([
+  'thank you', 'thank you very much', 'thank you so much', 'thanks', 'thank you bye',
+  'thanks for watching', 'thank you for watching', 'thank you so much for watching',
+  'thanks for watching and see you next time', 'please subscribe', 'like and subscribe',
+  'subscribe to my channel', 'please like and subscribe', 'see you next time',
+  'see you in the next video', 'bye', 'bye bye', 'you', 'so', 'okay', 'oh', 'hmm', 'um',
+  'the end', 'music', 'applause', 'silence', 'subtitles by the amara org community',
+  'transcribed by https otter ai', 'www mooji org',
+]);
+const ALWAYS_HALLUCINATION = new Set([
+  'thanks for watching', 'thank you for watching', 'thank you so much for watching',
+  'thanks for watching and see you next time', 'please subscribe', 'like and subscribe',
+  'subscribe to my channel', 'please like and subscribe', 'see you in the next video',
+  'subtitles by the amara org community', 'transcribed by https otter ai', 'www mooji org',
+]);
+const NO_SPEECH_MESSAGE = 'No speech was heard in this recording. Check that the mic is not covered, hold the phone a little closer and record again.';
+
+function normalizeForHallucination(text) {
+  return String(text || '')
+    .toLowerCase()
+    .replace(/[^\p{L}\p{N}\s]/gu, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+// True when the whole transcript is a known silence artefact (or empty).
+// durationSec is optional (unknown for some providers).
+function isHallucinatedTranscript(text, durationSec) {
+  const n = normalizeForHallucination(text);
+  if (!n) return true;
+  if (ALWAYS_HALLUCINATION.has(n)) return true;
+  // A real "thank you" note is ~1 s; the same words over 4+ s of audio are the
+  // model filling silence.
+  if (HALLUCINATION_PHRASES.has(n) && Number(durationSec) >= 4) return true;
+  return false;
+}
+
+// Groq verbose_json -> cleaned text. Drops segments Whisper itself marks as
+// non-speech, and trailing stock phrases ("Thank you for watching!") that the
+// model appends after real speech ends.
+function cleanWhisperVerbose(payload) {
+  const duration = Number(payload?.duration) || 0;
+  const segments = Array.isArray(payload?.segments) ? payload.segments : null;
+  let text = typeof payload?.text === 'string' ? payload.text.trim() : '';
+  if (segments && segments.length) {
+    const kept = segments.filter((seg) => {
+      const n = normalizeForHallucination(seg?.text);
+      if (!n) return false;
+      const noSpeech = Number(seg?.no_speech_prob) || 0;
+      const logprob = Number(seg?.avg_logprob) || 0;
+      if (noSpeech > 0.6 && logprob < -0.5) return false;
+      if (ALWAYS_HALLUCINATION.has(n)) return false;
+      if (HALLUCINATION_PHRASES.has(n) && noSpeech > 0.5) return false;
+      return true;
+    });
+    if (kept.length !== segments.length) {
+      text = kept.map((seg) => String(seg.text || '').trim()).filter(Boolean).join(' ').trim();
+    }
+  }
+  return { text, duration, noSpeech: isHallucinatedTranscript(text, duration) };
+}
+
 async function callDeepgramTranscription(audioBuffer, mimeType, language) {
   if (deepgramKeys.length === 0 || !audioBuffer || audioBuffer.length === 0) return null;
   const langParam = language && language !== 'auto'
@@ -428,6 +495,11 @@ async function callDeepgramTranscription(audioBuffer, mimeType, language) {
       }
       const data = await response.json().catch(() => null);
       const transcript = data?.results?.channels?.[0]?.alternatives?.[0]?.transcript;
+      const dgDuration = Number(data?.metadata?.duration) || undefined;
+      if (typeof transcript === 'string' && transcript.trim() && isHallucinatedTranscript(transcript, dgDuration)) {
+        console.log('deepgram_no_speech');
+        return { noSpeech: true };
+      }
       if (transcript !== undefined && typeof transcript === 'string' && transcript.trim()) {
         console.log('deepgram_transcription_succeeded');
         return { text: transcript.trim(), model: `deepgram/${process.env.DEEPGRAM_MODEL || 'nova-3'}` };
@@ -733,7 +805,7 @@ app.post('/transcribe', authMiddleware, rateLimitMiddleware, idempotencyMiddlewa
         const form = new FormData();
         form.append('file', new Blob([audioBuffer], { type: audioMimeType || 'audio/mp4' }), originalFilename);
         form.append('model', model);
-        form.append('response_format', 'json');
+        form.append('response_format', 'verbose_json');
         form.append('temperature', '0');
         if (requestedLanguage && requestedLanguage !== 'auto') {
           form.append('language', requestedLanguage);
@@ -759,8 +831,13 @@ app.post('/transcribe', authMiddleware, rateLimitMiddleware, idempotencyMiddlewa
           continue; // Try next model candidate
         }
         if (payload?.text !== undefined && typeof payload.text === 'string') {
+          const cleaned = cleanWhisperVerbose(payload);
+          if (cleaned.noSpeech) {
+            console.log(`groq_no_speech model=${model} duration=${cleaned.duration} raw=${JSON.stringify(payload.text.trim().slice(0, 60))}`);
+            return res.status(422).json({ error: NO_SPEECH_MESSAGE, noSpeech: true, requestId: req.requestId });
+          }
           console.log(`groq_transcription_succeeded model=${model}`);
-          return res.json({ text: payload.text.trim(), model });
+          return res.json({ text: cleaned.text, model });
         }
       } catch (err) {
         console.warn(`transcription_attempt_failed model=${model}`, err instanceof Error ? err.message : err);
@@ -771,6 +848,9 @@ app.post('/transcribe', authMiddleware, rateLimitMiddleware, idempotencyMiddlewa
   // 2. Cascading Fallback: Deepgram Nova-2 speech-to-text
   console.log('transcribe: Groq keys exhausted or failed, attempting Deepgram fallback');
   const deepgramResult = await callDeepgramTranscription(audioBuffer, audioMimeType, requestedLanguage);
+  if (deepgramResult?.noSpeech) {
+    return res.status(422).json({ error: NO_SPEECH_MESSAGE, noSpeech: true, requestId: req.requestId });
+  }
   if (deepgramResult) {
     return res.json(deepgramResult);
   }
@@ -778,6 +858,9 @@ app.post('/transcribe', authMiddleware, rateLimitMiddleware, idempotencyMiddlewa
   // 3. Cascading Fallback: Google Gemini Multimodal STT
   console.log('transcribe: Deepgram exhausted or failed, attempting Google Gemini STT fallback');
   const geminiResult = await callGeminiTranscription(audioBuffer, audioMimeType, requestedLanguage);
+  if (geminiResult && isHallucinatedTranscript(geminiResult.text)) {
+    return res.status(422).json({ error: NO_SPEECH_MESSAGE, noSpeech: true, requestId: req.requestId });
+  }
   if (geminiResult) {
     return res.json(geminiResult);
   }
