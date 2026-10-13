@@ -591,7 +591,7 @@ export default function RecordScreen() {
       const isAuthError = error instanceof Error && error.message === 'AUTH_REQUIRED';
       const isGuestLimit = error instanceof Error && error.message === 'GUEST_LIMIT_REACHED';
       const message = isGuestLimit
-        ? 'Your free guest transcriptions are used up for today. Sign in to continue using AI transcription.'
+        ? 'You have used today\'s 10 free guest transcriptions. Sign in (it\'s free) to keep transcribing, or try again tomorrow.'
         : isAuthError
         ? 'Sign in required. Go to Profile → Sign In to use AI transcription.'
         : toFriendlyErrorMessage(error, 'Transcription could not be completed. Please try again.');
@@ -742,7 +742,7 @@ export default function RecordScreen() {
                     <View style={styles.authNoticeContent}>
                       <ThemedText style={styles.authNoticeTitle}>Guest Mode</ThemedText>
                       <ThemedText style={styles.authNoticeSub}>
-                        Sign in for free cloud sync and more transcription. Guests get a few free notes a day.
+                        Guests get 10 free AI transcriptions a day. Sign in (it's free) for more, plus cloud backup of your notes.
                       </ThemedText>
                     </View>
                     <Pressable
