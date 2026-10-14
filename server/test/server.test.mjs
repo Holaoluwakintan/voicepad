@@ -88,3 +88,38 @@ test('mobile guest: requests to other features are still accepted after summarie
   const tr = await request(app).post('/transcribe').set('X-Client-Type', 'mobile').set('Idempotency-Key', 'guest-tr-0').send();
   assert.notEqual(tr.status, 429);
 });
+
+import { joinPieces, quickLanguageGuess, extFor } from '../stt.mjs';
+
+test('v2 status lists engine counts and never keys', async () => {
+  const response = await request(app).get('/v2/status');
+  assert.equal(response.status, 200);
+  assert.equal(response.body.ok, true);
+  assert.equal(typeof response.body.engines.groq, 'number');
+  assert.doesNotMatch(JSON.stringify(response.body), /gsk_|sk-|AIza/);
+});
+
+test('v2 transcribe is behind the same auth gate', async () => {
+  const response = await request(app).post('/v2/transcribe').set('Idempotency-Key', 'v2-unauth').send();
+  assert.equal(response.status, 401);
+});
+
+test('pieces cut with an overlap do not repeat words', () => {
+  assert.equal(joinPieces(['we go meet for Oba', 'for Oba Adesida Road'], [false, true]), 'we go meet for Oba Adesida Road');
+  assert.equal(joinPieces(['first part.', 'second part.'], [false, false]), 'first part. second part.');
+  assert.equal(joinPieces(['', 'only this'], [false, false]), 'only this');
+});
+
+test('rule-based language guess spots Pidgin, Yoruba, Igbo, Hausa', () => {
+  assert.equal(quickLanguageGuess('Abeg make you no vex, I dey come'), 'pcm');
+  assert.equal(quickLanguageGuess('Àwọn èèyàn ti mọ̀ nípa àwọn kẹ́míkà'), 'yo');
+  assert.equal(quickLanguageGuess('ụmụ igbe ntuli aka ga-abụrịrị'), 'ig');
+  assert.equal(quickLanguageGuess('mai ɗauke da mazauna'), 'ha');
+  assert.equal(quickLanguageGuess('Let them have more questions'), 'en');
+});
+
+test('piece file extension follows the upload', () => {
+  assert.equal(extFor('audio/ogg', 'voice.ogg'), '.ogg');
+  assert.equal(extFor('audio/m4a', 'recording.m4a'), '.m4a');
+  assert.equal(extFor('audio/3gpp', ''), '.3gp');
+});

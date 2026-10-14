@@ -7,6 +7,8 @@ import os from 'node:os';
 import cors from 'cors';
 import express from 'express';
 import multer from 'multer';
+import path from 'node:path';
+import { transcribeFile, tagLanguage, translateToEnglish, LANGUAGE_LABELS, engineConfig, keyHealth, getFfmpeg, extFor } from './stt.mjs';
 
 if (typeof process.loadEnvFile === 'function') {
   try { process.loadEnvFile(); } catch {}
@@ -157,6 +159,7 @@ app.use((req, res, next) => {
   req.clientIp = clientIpOf(req);
   const requestId = req.headers['x-request-id'] || crypto.randomUUID();
   req.requestId = String(requestId);
+  req.receivedAt = Date.now();
   res.setHeader('x-request-id', req.requestId);
   next();
 });
@@ -283,7 +286,7 @@ async function authMiddleware(req, res, next) {
     // Each AI feature has its own daily guest allowance (10 transcriptions, 10 summaries,
     // 10 scans), so summarising a note never eats into the transcriptions the app promises.
     // A request that fails (no speech, provider down, bad input) is refunded.
-    const feature = req.path === '/summarize' ? 'summaries' : req.path === '/ocr' ? 'scans' : req.path === '/transcribe' ? 'transcriptions' : null;
+    const feature = req.path === '/summarize' ? 'summaries' : req.path === '/ocr' ? 'scans' : (req.path === '/transcribe' || req.path === '/v2/transcribe') ? 'transcriptions' : req.path === '/v2/translate' ? 'translations' : null;
     if (!feature) { req.isMobileGuest = true; return next(); }
     const quotaKey = `${req.clientIp}|${feature}`;
     const requestKey = `${req.path}:${String(req.headers['idempotency-key'] || req.body?.noteId || '').trim()}`;
@@ -748,6 +751,11 @@ async function callGeminiVision(base64Data, mimeType) {
 }
 
 app.post('/transcribe', authMiddleware, rateLimitMiddleware, idempotencyMiddleware, upload.single('file'), async (req, res) => {
+  // STT v2 switch: STT_V2_DEFAULT=true sends every /transcribe through the v2 pipeline;
+  // a client can opt in per request with the X-VoicePad-STT: v2 header. Unset = old pipeline.
+  if (process.env.STT_V2_DEFAULT === 'true' || String(req.headers['x-voicepad-stt'] || '').toLowerCase() === 'v2') {
+    return handleTranscribeV2(req, res);
+  }
   let audioBuffer = null;
   let audioMimeType = 'audio/m4a';
   let originalFilename = 'voice-note.m4a';
@@ -894,6 +902,110 @@ app.post('/transcribe', authMiddleware, rateLimitMiddleware, idempotencyMiddlewa
       fs.promises.unlink(tempDiskFile).catch(() => {});
     }
   }
+});
+
+
+// ====================
+//  STT v2 (2026-10-14): Scribe-first routing, parallel pieces, language tag
+// ====================
+async function handleTranscribeV2(req, res) {
+  const t0 = Date.now();
+  let tempFile = null;
+  let ownTemp = false;
+  try {
+    let mime = 'audio/m4a';
+    let filename = 'voice-note.m4a';
+    if (req.file) {
+      tempFile = req.file.path;
+      mime = req.file.mimetype || mime;
+      filename = req.file.originalname || filename;
+    } else {
+      const rawAudio = req.body?.audio || req.body?.audioBase64 || req.body?.audio_base64 || req.body?.file || req.body?.fileBase64 || req.body?.data;
+      if (rawAudio) {
+        let base64 = String(rawAudio);
+        const match = base64.match(/^data:([^;]+);base64,(.+)$/);
+        if (match) { mime = match[1]; base64 = match[2]; }
+        if (!/^[A-Za-z0-9+/]*={0,2}$/.test(base64) || base64.length % 4 === 1) {
+          return res.status(400).json({ error: 'Invalid base64 audio data.' });
+        }
+        filename = req.body.filename || req.body.fileName || filename;
+        mime = req.body.mimeType || req.body.contentType || mime;
+        const buf = Buffer.from(base64, 'base64');
+        if (buf.length > maxFileSize) return res.status(413).json({ error: `Audio file is larger than ${Math.round(maxFileSize / (1024 * 1024))} MB.` });
+        tempFile = path.join(os.tmpdir(), `vp-${crypto.randomUUID()}${extFor(mime, filename)}`);
+        await fs.promises.writeFile(tempFile, buf);
+        ownTemp = true;
+      }
+    }
+    if (!tempFile) return res.status(400).json({ error: 'Audio file or base64 data is required.' });
+    const size = (await fs.promises.stat(tempFile)).size;
+    if (!size) return res.status(400).json({ error: 'Audio file or base64 data is required.' });
+    if (req.isWebGuest && size > 25 * 1024 * 1024) {
+      return res.status(429).json({ error: 'Web preview recordings are limited to 10 minutes. Download the VoicePad Android APK for unlimited recording length.', upgradeUrl: process.env.APK_DOWNLOAD_URL || null, limitReached: true, requestId: req.requestId });
+    }
+    const requested = String(req.body?.language || req.query?.language || '').trim().toLowerCase();
+    const language = LANGUAGE_LABELS[requested] && requested !== 'other' ? requested : undefined;
+    const uploadMs = req.receivedAt ? t0 - req.receivedAt : undefined;
+
+    const result = await transcribeFile(tempFile, { mime, filename, language });
+    console.log(`stt_v2 bytes=${size} dur=${result.durationSec ?? '?'} pieces=${result.pieces} ok=${result.ok} model=${result.model || '-'} ms=${Date.now() - t0} trail=${JSON.stringify(result.trail).slice(0, 600)}`);
+    if (!result.ok) {
+      return res.status(502).json({ error: 'Transcription provider could not process the audio. Please retry.', requestId: req.requestId });
+    }
+    const text = (result.text || '').trim();
+    if (!text || isHallucinatedTranscript(text, result.durationSec || undefined)) {
+      return res.status(422).json({ error: NO_SPEECH_MESSAGE, noSpeech: true, requestId: req.requestId });
+    }
+    const tag = language ? { language, languages: [language], by: 'client' } : await tagLanguage(text);
+    const wantEnglish = ['1', 'true', 'yes'].includes(String(req.body?.translate ?? req.query?.translate ?? '').toLowerCase());
+    let english;
+    if (wantEnglish && tag.language !== 'en') english = (await translateToEnglish(text))?.english;
+    return res.json({
+      text,
+      model: result.model,
+      language: tag.language,
+      languageLabel: LANGUAGE_LABELS[tag.language] || tag.language,
+      languages: tag.languages,
+      ...(english ? { english } : {}),
+      durationSec: result.durationSec ? Math.round(result.durationSec * 10) / 10 : undefined,
+      pieces: result.pieces,
+      ...(result.missingPieces ? { missingPieces: result.missingPieces } : {}),
+      timings: { uploadMs, ...result.timings, totalMs: Date.now() - t0 },
+      pipeline: 'v2',
+      requestId: req.requestId,
+    });
+  } catch (err) {
+    console.warn('stt_v2_error', err instanceof Error ? err.message : err);
+    return res.status(502).json({ error: 'Transcription provider could not process the audio. Please retry.', requestId: req.requestId });
+  } finally {
+    if (tempFile) fs.promises.unlink(tempFile).catch(() => {});
+    void ownTemp;
+  }
+}
+
+app.post('/v2/transcribe', authMiddleware, rateLimitMiddleware, idempotencyMiddleware, upload.single('file'), handleTranscribeV2);
+
+app.post('/v2/translate', authMiddleware, rateLimitMiddleware, idempotencyMiddleware, async (req, res) => {
+  const text = String(req.body?.text || '').trim();
+  if (!text) return res.status(400).json({ error: 'Text is required.' });
+  if (text.length > 20000) return res.status(413).json({ error: 'Text is too long to translate in one go.' });
+  const out = await translateToEnglish(text);
+  if (!out) return res.status(502).json({ error: 'Translation is not available right now. Please retry.', requestId: req.requestId });
+  return res.json({ english: out.english, model: out.model, requestId: req.requestId });
+});
+
+// Which engines are configured (counts only, never keys) and whether pieces can be cut.
+app.get('/v2/status', async (_req, res) => {
+  const cfg = engineConfig();
+  res.json({
+    ok: true,
+    pipeline: process.env.STT_V2_DEFAULT === 'true' ? 'v2' : 'v1 (v2 at /v2/transcribe)',
+    engines: Object.fromEntries(Object.entries(cfg).map(([k, v]) => [k, v.length])),
+    order: (process.env.STT_ENGINE_ORDER || 'elevenlabs,openrouter,groq,gemini,deepgram'),
+    parallelPieces: Boolean(await getFfmpeg()),
+    benchedKeys: keyHealth().length,
+    uptimeSec: Math.round(process.uptime()),
+  });
 });
 
 app.post('/summarize', authMiddleware, rateLimitMiddleware, idempotencyMiddleware, async (req, res) => {
