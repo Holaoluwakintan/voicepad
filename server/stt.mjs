@@ -78,7 +78,7 @@ export async function probeDurationSec(file) {
 }
 
 // Find the quietest moment near `t` by decoding only a short window around it.
-async function quietPointNear(ff, file, t, windowSec = 7) {
+async function quietPointNear(ff, file, t, windowSec = 3.5) {
   const start = Math.max(0, t - windowSec);
   const { stderr } = await run(ff, ['-hide_banner', '-nostats', '-ss', String(start), '-t', String(windowSec * 2), '-i', file,
     '-af', 'silencedetect=n=-35dB:d=0.25', '-f', 'null', '-'], 20_000).catch(() => ({ stderr: '' }));
@@ -111,19 +111,22 @@ export async function splitAtPauses(file, durationSec, { target = 60, maxPieces 
   const wanted = [];
   for (let t = size; t < durationSec - size * 0.35; t += size) wanted.push(t);
   if (wanted.length === 0) return null;
-  const quiet = await Promise.all(wanted.map((t) => quietPointNear(ff, file, t)));
+  // Small free-tier CPUs choke on many ffmpeg processes at once, so run a few at a time.
+  const pool = async (items, n, fn) => { const out = new Array(items.length); let k = 0; await Promise.all(Array.from({ length: Math.min(n, items.length) }, async () => { while (k < items.length) { const i = k++; out[i] = await fn(items[i], i); } })); return out; };
+  const ffJobs = Math.max(1, Number(env.STT_FFMPEG_JOBS || 3));
+  const quiet = await pool(wanted, ffJobs, (t) => quietPointNear(ff, file, t));
   const cuts = [0, ...wanted.map((t, i) => (quiet[i] && Math.abs(quiet[i] - t) < size / 2 ? quiet[i] : t)), durationSec];
   const exact = [true, ...wanted.map((t, i) => Boolean(quiet[i] && Math.abs(quiet[i] - t) < size / 2)), true];
   const dir = await fs.promises.mkdtemp(path.join(os.tmpdir(), 'vp-pieces-'));
   const pieces = [];
-  await Promise.all(cuts.slice(0, -1).map(async (from, i) => {
+  await pool(cuts.slice(0, -1), ffJobs, async (from, i) => {
     // A cut that did not land in a pause gets a small overlap so no word is lost.
     const a = Math.max(0, from - (exact[i] ? 0 : overlap));
     const b = Math.min(durationSec, cuts[i + 1] + (exact[i + 1] ? 0 : overlap));
     const out = path.join(dir, `p${String(i).padStart(2, '0')}${ext}`);
     const { code } = await run(ff, ['-hide_banner', '-nostats', '-y', '-ss', a.toFixed(3), '-to', b.toFixed(3), '-i', file, '-vn', '-c', 'copy', out], 30_000);
     pieces[i] = code === 0 && fs.existsSync(out) && fs.statSync(out).size > 512 ? { file: out, from: a, to: b, overlapBefore: !exact[i] } : null;
-  }));
+  });
   if (pieces.some((p) => !p)) { fs.promises.rm(dir, { recursive: true, force: true }).catch(() => {}); return null; }
   return { dir, pieces };
 }
@@ -346,7 +349,14 @@ export async function transcribeFile(file, { mime, filename, language } = {}) {
   const durationSec = await probeDurationSec(file).catch(() => null);
   const threshold = Number(env.STT_CHUNK_THRESHOLD_SEC || 90);
   let split = null;
-  if (durationSec && durationSec > threshold) {
+  // Pieces only pay off for engines that are slow on one long file (Scribe: 27 min in
+  // 47.6 s whole vs 5.9 s in pieces). Groq Whisper does 27 min in ~3 s whole, so when no
+  // Scribe key is usable the file goes whole (up to Groq's 25 MB).
+  const cfg = engineConfig();
+  const scribeReady = [...cfg.elevenlabs, ...cfg.openrouter].some((k) => !isBenched(k));
+  const size = await fs.promises.stat(file).then((st) => st.size).catch(() => 0);
+  const wantPieces = scribeReady || size > 24 * 1024 * 1024;
+  if (wantPieces && durationSec && durationSec > threshold) {
     split = await splitAtPauses(file, durationSec, { target: Number(env.STT_CHUNK_SEC || 60), ext: extFor(mime, filename) }).catch(() => null);
   }
   const probeMs = Date.now() - started;
