@@ -8,7 +8,7 @@ import cors from 'cors';
 import express from 'express';
 import multer from 'multer';
 import path from 'node:path';
-import { transcribeFile, tagLanguage, translateToEnglish, LANGUAGE_LABELS, engineConfig, keyHealth, getFfmpeg, extFor } from './stt.mjs';
+import { transcribeFile, tagLanguage, translateToEnglish, LANGUAGE_LABELS, normalizeLanguage, engineConfig, keyHealth, getFfmpeg, extFor } from './stt.mjs';
 
 if (typeof process.loadEnvFile === 'function') {
   try { process.loadEnvFile(); } catch {}
@@ -943,8 +943,7 @@ async function handleTranscribeV2(req, res) {
     if (req.isWebGuest && size > 25 * 1024 * 1024) {
       return res.status(429).json({ error: 'Web preview recordings are limited to 10 minutes. Download the VoicePad Android APK for unlimited recording length.', upgradeUrl: process.env.APK_DOWNLOAD_URL || null, limitReached: true, requestId: req.requestId });
     }
-    const requested = String(req.body?.language || req.query?.language || '').trim().toLowerCase();
-    const language = LANGUAGE_LABELS[requested] && requested !== 'other' ? requested : undefined;
+    const language = normalizeLanguage(req.body?.language || req.query?.language);
     const uploadMs = req.receivedAt ? t0 - req.receivedAt : undefined;
 
     const result = await transcribeFile(tempFile, { mime, filename, language });

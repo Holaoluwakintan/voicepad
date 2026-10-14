@@ -19,7 +19,8 @@ import crypto from 'node:crypto';
 const env = process.env;
 const list = (...srcs) => Array.from(new Set(srcs.filter(Boolean).flatMap((s) => String(s).split(',').map((k) => k.trim()).filter(Boolean))));
 
-export const LANGUAGE_LABELS = { en: 'English', pcm: 'Pidgin', yo: 'Yorùbá', ig: 'Igbo', ha: 'Hausa', other: 'Other' };
+export const LANGUAGE_LABELS = { en: 'English', pcm: 'Pidgin', yo: 'Yorùbá', ig: 'Igbo', ha: 'Hausa', fr: 'French', es: 'Spanish', de: 'German', ar: 'Arabic', zh: 'Chinese', pt: 'Portuguese', hi: 'Hindi', other: 'Other' };
+export const normalizeLanguage = (v) => { const c = String(v || '').trim().toLowerCase(); return /^[a-z]{2,3}$/.test(c) && c !== 'other' ? c : undefined; };
 
 // ─── Key health ──────────────────────────────────────────────────────────────
 const benched = new Map(); // keyId -> until (ms)
@@ -181,7 +182,7 @@ async function scribeDirect(key, buf, mime, name, sec, language) {
   form.append('model_id', env.ELEVENLABS_STT_MODEL || 'scribe_v2');
   form.append('tag_audio_events', 'false');
   form.append('diarize', 'false');
-  if (language) form.append('language_code', language);
+  if (language && language !== 'pcm') form.append('language_code', language); // Scribe has no 'pcm' code; auto handles Pidgin
   const resp = await fetchWithTimeout(`${base}/v1/speech-to-text`, { method: 'POST', headers: { [header]: value }, body: form }, timeoutFor(sec));
   if (!resp.ok) return { status: resp.status, retryAfter: resp.headers.get('retry-after') };
   const j = await resp.json().catch(() => null);
@@ -193,7 +194,7 @@ async function scribeOpenRouter(key, buf, mime, name, sec, language) {
   const form = new FormData();
   form.append('file', audioBlob(buf, mime), name);
   form.append('model', env.OPENROUTER_STT_MODEL || 'elevenlabs/scribe-v2');
-  if (language) form.append('language', language);
+  if (language && language.length === 2) form.append('language', language);
   const resp = await fetchWithTimeout('https://openrouter.ai/api/v1/audio/transcriptions', {
     method: 'POST', headers: { Authorization: `Bearer ${key}`, 'X-Title': 'VoicePad', 'HTTP-Referer': 'https://voicepadapp.vercel.app' }, body: form,
   }, timeoutFor(sec));
@@ -203,14 +204,14 @@ async function scribeOpenRouter(key, buf, mime, name, sec, language) {
   return { text: j.text, model: `openrouter/${env.OPENROUTER_STT_MODEL || 'elevenlabs/scribe-v2'}` };
 }
 
-const WHISPER_LANG = { en: 'en', pcm: 'en', yo: 'yo', ha: 'ha' }; // Whisper has no Igbo
+const whisperLang = (l) => (!l || l === 'ig' ? undefined : l === 'pcm' ? 'en' : l.length === 2 ? l : undefined); // Whisper has no Igbo; a wrong code is a 400
 async function groqWhisper(key, buf, mime, name, sec, language) {
   const form = new FormData();
   form.append('file', audioBlob(buf, mime), name);
   form.append('model', env.GROQ_TRANSCRIPTION_MODEL || 'whisper-large-v3-turbo');
   form.append('response_format', 'verbose_json');
   form.append('temperature', '0');
-  if (language && WHISPER_LANG[language]) form.append('language', WHISPER_LANG[language]);
+  if (whisperLang(language)) form.append('language', whisperLang(language));
   const resp = await fetchWithTimeout(`${env.GROQ_BASE_URL || 'https://api.groq.com/openai/v1'}/audio/transcriptions`, {
     method: 'POST', headers: { Authorization: `Bearer ${key}` }, body: form,
   }, timeoutFor(sec));
@@ -345,7 +346,7 @@ export async function translateToEnglish(text) {
 // ─── Whole recording ─────────────────────────────────────────────────────────
 export async function transcribeFile(file, { mime, filename, language } = {}) {
   const started = Date.now();
-  const lang = language && LANGUAGE_LABELS[language] && language !== 'other' ? language : undefined;
+  const lang = normalizeLanguage(language);
   const durationSec = await probeDurationSec(file).catch(() => null);
   const threshold = Number(env.STT_CHUNK_THRESHOLD_SEC || 90);
   let split = null;
